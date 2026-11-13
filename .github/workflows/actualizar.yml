@@ -1,0 +1,57 @@
+# Mantiene data/ al día y publica la página en GitHub Pages.
+# - Cada 15 min en horario de mercado (lun-vie 10 a 18:45 h AR = 13 a 21:45 UTC): cotizaciones + foto histórica.
+# - Una vez por día a las 6 h AR: índices del BCRA aunque no haya mercado.
+# - En cada push a main: republica con el código nuevo.
+# GitHub puede demorar las ejecuciones programadas unos minutos.
+name: Actualizar datos y publicar
+
+on:
+  schedule:
+    - cron: "*/15 13-21 * * 1-5"
+    - cron: "0 9 * * *"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: actualizar
+  cancel-in-progress: false
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+
+      - name: Bajar cotizaciones e índices
+        run: python update.py
+        continue-on-error: true   # si una fuente cae, se publica con el último dato guardado
+
+      - name: Foto histórica de TIR
+        if: github.event_name == 'schedule' && github.event.schedule != '0 9 * * *'
+        run: node snapshot.js
+
+      - name: Guardar datos en el repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          git diff --cached --quiet || git commit -m "Datos $(date -u +'%Y-%m-%d %H:%M') UTC" && git push
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: "." }
+      - id: deploy
+        uses: actions/deploy-pages@v4

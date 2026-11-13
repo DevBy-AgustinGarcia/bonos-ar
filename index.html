@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel de Bonos AR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: barra de estado, indicadores de mercado, pestañas por tipo de bono, curva y tabla de la pestaña activa. */
+:root{
+  --bg:#f5f6f4; --surface:#ffffff; --fg:#17201b; --muted:#5d6a62; --line:#dde2de;
+  --accent:#1f6f54; --s1:#1f6f54; --s2:#b45309; --up:#18794e; --down:#b4232c; --warn:#a16207;
+  --sans:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#111513; --surface:#181d1a; --fg:#e4ebe6; --muted:#93a198; --line:#2a322d;
+  --accent:#4cc39a; --s1:#4cc39a; --s2:#f0a35c; --up:#4cc38a; --down:#f07178; --warn:#e3b341;
+  color-scheme:dark;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--sans)}
+.wrap{max-width:1320px;margin:0 auto;padding:20px 16px 40px;display:grid;gap:16px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:13px}
+.status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+.dot.ok{background:var(--up)} .dot.err{background:var(--down)} .dot.load{background:var(--warn)}
+button,select{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
+button:hover,select:hover{border-color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+label.chk{display:flex;gap:6px;align-items:center;cursor:pointer}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 12px}
+.kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.kpi .v{font:500 18px var(--mono);font-variant-numeric:tabular-nums}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.tabs a{padding:8px 14px;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500}
+.tabs a:hover{color:var(--fg)}
+.tabs a.on{color:var(--fg);border-color:var(--accent)}
+.tabs a span{font:400 11px var(--mono);color:var(--muted);margin-left:4px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px;min-width:0}
+.panel h2{margin:0;font-size:14px;font-weight:600}
+.phead{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px}
+.desc{color:var(--muted);font-size:13px;max-width:90ch;margin:0 0 4px}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.scroll{overflow-x:auto}
+#chart svg{min-width:640px;display:block}
+svg text{font-family:var(--mono);font-size:11px;fill:var(--muted)}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;min-width:980px}
+th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:500;cursor:pointer;user-select:none;position:sticky;top:0;background:var(--surface)}
+th.sorted{color:var(--fg)}
+th.l,td.l{text-align:left}
+td{font-family:var(--mono);font-size:13px}
+td.tk{font-family:var(--sans);font-weight:600}
+td.nm{font-family:var(--sans);color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis}
+td.tir{font-weight:500}
+tr.dim td{opacity:.55}
+.up{color:var(--up)} .down{color:var(--down)}
+.tag{font:500 11px var(--sans);padding:1px 6px;border-radius:4px;border:1px solid currentColor;color:var(--muted)}
+.warn{color:var(--warn);cursor:help}
+.notes{color:var(--muted);font-size:12px;max-width:95ch;display:grid;gap:4px}
+.filters{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;font-size:13px;color:var(--muted)}
+.filters label{display:flex;gap:6px;align-items:center}
+.filters input[type=search]{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:5px 10px;width:190px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;border-radius:0;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--accent);color:var(--bg)}
+.err-box{color:var(--down);font-size:13px;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Bonos argentinos</h1>
+      <div class="sub">Precio, valor técnico, paridad y TIR de todo lo que cotiza en BYMA, por tipo de ajuste</div>
+    </div>
+    <div class="status">
+      <span><span id="dot" class="dot load"></span> <span id="stat">Cargando…</span></span>
+      <label class="chk"><input type="checkbox" id="onlyVol"> Sólo con operaciones</label>
+      <span id="espWrap"><select id="esp" aria-label="Especie de precio en dólares"><option value="usd">US$ MEP (D)</option><option value="ccl">US$ Cable (C)</option></select></span>
+      <button id="refresh" type="button">Actualizar</button>
+    </div>
+  </header>
+
+  <section class="kpis" id="kpis"></section>
+  <nav class="tabs" id="tabs"></nav>
+
+  <section class="filters" aria-label="Filtros">
+    <div class="seg" id="fScope" role="group" aria-label="Emisor">
+      <button type="button" data-v="all">Todos</button><button type="button" data-v="nac">Nacionales</button><button type="button" data-v="sub">Provinciales y municipales</button>
+    </div>
+    <label>Emisor <select id="fIssuer"></select></label>
+    <label>Vence desde <select id="fY0"></select></label>
+    <label>hasta <select id="fY1"></select></label>
+    <label><input type="search" id="fQ" placeholder="Buscar ticker o nombre" aria-label="Buscar"></label>
+    <label class="chk"><input type="checkbox" id="fTir"> Sólo con TIR</label>
+    <button type="button" id="fClear">Limpiar</button>
+    <span id="fCount" class="sub"></span>
+  </section>
+
+  <section class="panel">
+    <div class="phead"><h2 id="ptitle"></h2><div class="legend"><span><i style="background:var(--s1)"></i>Nación / BCRA</span><span><i style="background:var(--s2)"></i>Provincias y municipios</span></div></div>
+    <p class="desc" id="pdesc"></p>
+    <div id="chart" class="scroll"></div>
+  </section>
+
+  <section class="panel">
+    <div class="scroll"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
+    <div id="err" class="err-box"></div>
+  </section>
+
+  <section class="notes">
+    <div>Fuentes: cotizaciones de data912.com (gratuito, con demora); CER, TAMAR, BADLAR y A3500 de la API del BCRA; condiciones de emisión de las fichas técnicas de BYMA. Se actualiza solo cada 15 minutos.</div>
+    <div>Valores por 100 de valor nominal original. Los precios en Argentina incluyen intereses corridos, así que paridad = precio / valor técnico. Liquidación T+1 hábil; los feriados no están modelados.</div>
+    <div>CER: TIR real (sobre inflación), con CER rezagado 10 días hábiles. Dollar linked: TIR en dólares al A3500. TAMAR, BADLAR y duales: TIR proyectada suponiendo que la tasa de hoy se mantiene hasta el vencimiento. ⚠ marca condiciones incompletas o supuestas.</div>
+  </section>
+</div>
+
+<script src="engine.js"></script>
+<script>
+const E = window.BondEngine;
+const SECTIONS = [
+  { id:'cer',    g:'CER',    title:'Ajustables por CER',  tir:'TIR real',      desc:'Capital ajustado por inflación (CER). La TIR es el rendimiento por encima de la inflación.' },
+  { id:'tamar',  g:'TAMAR',  title:'Tasa TAMAR',          tir:'TEA proy.',     desc:'Pagan la tasa TAMAR de bancos privados (más un margen). La TIR supone que la TAMAR de hoy se mantiene.' },
+  { id:'duales', g:'DUAL',   title:'Duales',              tir:'TEA proy.',     desc:'Pagan el máximo entre dos patas (tasa fija, TAMAR, CER o dólar). "Pata" indica cuál va ganando con los valores de hoy.' },
+  { id:'dl',     g:'DL',     title:'Dollar linked',       tir:'TIR US$',       desc:'Capital en dólares que se paga en pesos al tipo de cambio oficial A3500. La TIR es en dólares.' },
+  { id:'hd',     g:'HD',     title:'Hard dólar',          tir:'TIR US$',       desc:'Pagan en dólares billete. Soberanos, BOPREAL, provincias y CABA. Precio en la especie D (MEP) o C (cable).' },
+  { id:'letras', g:'LETRAS', title:'Letras y tasa fija',  tir:'TEA',           desc:'Lecaps, Boncaps y bonos a tasa fija en pesos. TNA y TEM sobre el pago final.' },
+  { id:'otros',  g:'OTROS',  title:'Otros',               tir:'TIR',           desc:'BADLAR, cupones PBI y otros instrumentos.' },
+];
+let CAT = [], quotes = null, idx = null, lastOk = null, sortKey = 'md', sortDir = 1;
+let tab = (location.hash || '').slice(1);
+try { if (!SECTIONS.some(s => s.id === tab)) tab = localStorage.getItem('tab') || 'hd'; } catch { tab = tab || 'hd'; }
+
+/* ---------- Formato ---------- */
+const nf = (v, d=2) => v == null || !isFinite(v) ? '—' : v.toLocaleString('es-AR',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct = (v, d=2) => v == null || !isFinite(v) ? '—' : nf(v*100, d) + '%';
+const fdate = d => d ? E.D(typeof d === 'string' ? d : E.iso(d)).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit',timeZone:'UTC'}) : '—';
+const px = E.px;
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const settlementDate = E.settlementDate;
+
+/* ---------- Datos ---------- */
+async function getJSON(u) { const r = await fetch(u, {cache:'no-store'}); const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || 'HTTP ' + r.status); return j; }
+// Cotizaciones: directo de data912 (permite pedidos del navegador); si falla, la última copia que guardó la tarea programada.
+async function getQuotes() {
+  try { return (await Promise.all(['arg_bonds','arg_notes'].map(e => getJSON('https://data912.com/live/' + e)))).flat(); }
+  catch { return getJSON('data/quotes.json'); }
+}
+async function load() {
+  setStatus('load', 'Actualizando…');
+  try {
+    if (location.protocol === 'file:') throw new Error('abrí el panel desde un servidor (python server.py y http://localhost:8020)');
+    const [c, q, i] = await Promise.all([CAT.length ? CAT : getJSON('catalog.json'), getQuotes(), getJSON('data/indices.json')]);
+    CAT = c; quotes = Object.fromEntries(q.map(x => [x.symbol, x])); idx = i; lastOk = new Date();
+    document.getElementById('err').textContent = '';
+    render();
+  } catch (e) {
+    setStatus('err', 'Sin datos nuevos');
+    document.getElementById('err').textContent = `No se pudieron leer los datos: ${e.message}. Se reintenta en el próximo ciclo.`;
+    if (quotes) render(true);
+  }
+}
+function setStatus(kind, text) { document.getElementById('dot').className = 'dot ' + kind; document.getElementById('stat').textContent = text; }
+
+/* ---------- Cálculo de todas las filas ---------- */
+function computeAll() {
+  const settle = settlementDate(), ctx = E.makeContext(idx, settle), esp = document.getElementById('esp').value;
+  const rows = [];
+  for (const b of CAT) {
+    const { sym, q, price } = E.priceFor(b, quotes, esp);
+    let v;
+    try { v = E.value(b, price, ctx); } catch (e) { v = { error: e.message }; }
+    if (v.matured) continue;
+    rows.push({ b, sym, q, ...v, tk: b.tk, name: b.name, issuer: b.issuer, mat: b.mat, chg: q ? q.pct_change/100 : null,
+                vol: q ? q.v : 0, parity: v.vt && v.price ? v.price / v.vt : null,
+                nextDate: v.next?.date, nextAmt: v.next?.amt, sov: ['Nación','BCRA'].includes(b.issuer) });
+  }
+  return { rows, ctx, settle };
+}
+
+/* ---------- Columnas por sección ---------- */
+function columns(sec) {
+  const c = [['tk','Bono','l'],['name','Nombre','l'],['mat','Vto.'],['days','Días'],['price','Precio'],['chg','Var.'],['vt','Valor téc.'],['parity','Paridad'],['tir',sec.tir],['md','Dur. mod.']];
+  if (sec.g === 'LETRAS') c.push(['tna','TNA'],['tem','TEM']);
+  if (['TAMAR','DUAL','OTROS'].includes(sec.g)) c.push(['leg','Pata','l']);
+  if (['HD','CER','OTROS','TAMAR'].includes(sec.g)) c.push(['rate','Cupón']);
+  c.push(['nextDate','Próx. pago'],['nextAmt','Monto'],['vol','Vol. $']);
+  return c;
+}
+function cell(r, k, sec) {
+  switch (k) {
+    case 'tk': return `<td class="tk l">${esc(r.tk)}${r.b.ok === false ? ` <span class="warn" title="${esc(r.b.notes || 'Condiciones incompletas')}">⚠</span>` : ''}</td>`;
+    case 'name': return `<td class="nm l" title="${esc(r.issuer)} · ${esc(r.sym || '')}">${esc(r.name)}</td>`;
+    case 'mat': return `<td>${fdate(r.mat)}</td>`;
+    case 'days': return `<td>${r.days ?? '—'}</td>`;
+    case 'price': return `<td>${nf(r.price)}</td>`;
+    case 'chg': return `<td class="${r.chg>0?'up':r.chg<0?'down':''}">${r.chg==null?'—':(r.chg>0?'+':'')+pct(r.chg)}</td>`;
+    case 'vt': return `<td>${nf(r.vt)}</td>`;
+    case 'parity': return `<td>${pct(r.parity,1)}</td>`;
+    case 'tir': return `<td class="tir">${pct(r.tir)}</td>`;
+    case 'md': return `<td>${nf(r.md)}</td>`;
+    case 'tna': case 'tem': return `<td>${pct(r[k])}</td>`;
+    case 'leg': return `<td class="l">${r.leg ? `<span class="tag">${r.leg}</span>` : ''}</td>`;
+    case 'rate': return `<td>${r.rate == null || r.b.kind === 'cap_fixed' ? '—' : nf(r.rate,3)+'%'}</td>`;
+    case 'nextDate': return `<td>${fdate(r.nextDate)}</td>`;
+    case 'nextAmt': return `<td>${nf(r.nextAmt,3)}</td>`;
+    case 'vol': return `<td>${nf(r.vol,0)}</td>`;
+  }
+}
+
+function render(stale) {
+  const { rows, ctx, settle } = computeAll();
+  if (!stale) setStatus('ok', `Actualizado ${lastOk.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})} · liquida ${fdate(settle)}`);
+
+  // Indicadores de mercado
+  const mep = px(quotes.AL30) / px(quotes.AL30D), ccl = px(quotes.GD30) / px(quotes.GD30C);
+  const last = a => a[a.length-1];
+  document.getElementById('kpis').innerHTML = [
+    ['MEP (AL30)', '$ ' + nf(mep)], ['CCL (GD30)', '$ ' + nf(ccl)], ['A3500', '$ ' + nf(ctx.a3500Now)],
+    ['TAMAR priv. TNA', nf(ctx.tamarNow) + '%'], ['BADLAR priv. TNA', nf(ctx.badlarNow) + '%'],
+    ['CER (liquidación)', nf(ctx.cerLag(settle), 4)],
+  ].map(([l,v]) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+
+  // Pestañas con cantidad de instrumentos
+  document.getElementById('tabs').innerHTML = SECTIONS.map(s =>
+    `<a href="#${s.id}" class="${s.id===tab?'on':''}">${s.title}<span>${rows.filter(r => r.b.group === s.g).length}</span></a>`).join('');
+
+  const sec = SECTIONS.find(s => s.id === tab);
+  document.getElementById('ptitle').textContent = sec.title + ': ' + sec.tir + ' vs duration modificada';
+  document.getElementById('pdesc').textContent = sec.desc;
+  document.getElementById('espWrap').hidden = sec.g !== 'HD';
+  const onlyVol = document.getElementById('onlyVol').checked;
+  const inSec = rows.filter(r => r.b.group === sec.g);
+  ALLYEARS = [...new Set(rows.map(year).filter(Boolean))].sort((a,b) => a-b);
+  const data = applyFilters(inSec).filter(r => !onlyVol || r.vol > 0);
+  document.getElementById('fCount').textContent = `${data.length} de ${inSec.length}`;
+
+  const cols = columns(sec);
+  if (!cols.some(c => c[0] === sortKey)) sortKey = 'md';
+  document.getElementById('thead').innerHTML = cols.map(([k,l,cls]) =>
+    `<th tabindex="0" data-k="${k}" class="${cls||''} ${k===sortKey?'sorted':''}">${l}${k===sortKey?(sortDir>0?' ▲':' ▼'):''}</th>`).join('');
+  const val = r => { const v = r[sortKey]; return v instanceof Date ? +v : v; };
+  const sorted = [...data].sort((a,b) => { const x = val(a), y = val(b);
+    if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
+    return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
+  document.getElementById('tbody').innerHTML = sorted.map(r =>
+    `<tr class="${r.tir == null ? 'dim' : ''}">${cols.map(([k]) => cell(r, k, sec)).join('')}</tr>`).join('')
+    || `<tr><td class="l" colspan="${cols.length}">No hay instrumentos que cumplan los filtros en esta sección.</td></tr>`;
+
+  drawChart(data.filter(r => r.tir != null && r.md != null && r.md > 0));
+}
+
+function drawChart(pts) {
+  const el = document.getElementById('chart');
+  if (pts.length < 2) { el.innerHTML = '<p class="desc">No hay suficientes bonos con TIR para dibujar la curva.</p>'; return; }
+  const W = 1200, H = 300, m = {l:52,r:24,t:14,b:34};
+  const xs = pts.map(p=>p.md), ys = pts.map(p=>p.tir*100);
+  const x1 = Math.max(...xs) * 1.05;
+  // Recorta el eje Y a percentiles para que un outlier (bono sin liquidez) no aplaste la curva
+  const sy_ = [...ys].sort((a,b)=>a-b), q = p => sy_[Math.min(sy_.length-1, Math.max(0, Math.round(p*(sy_.length-1))))];
+  let y0 = q(0.03), y1 = q(0.97); const pad = Math.max(1, (y1-y0)*0.12); y0 = Math.floor(y0 - pad); y1 = Math.ceil(y1 + pad);
+  const sx = v => m.l + v/x1*(W-m.l-m.r), sy = v => H-m.b - (Math.min(Math.max(v,y0),y1)-y0)/(y1-y0)*(H-m.t-m.b);
+  const nice = r => { const s = r/6, p = Math.pow(10, Math.floor(Math.log10(s))); return [1,2,2.5,5,10].map(k=>k*p).find(k=>k>=s); };
+  let g = '';
+  const ys_ = nice(y1-y0); for (let v = Math.ceil(y0/ys_)*ys_; v <= y1; v += ys_) g += `<line x1="${m.l}" x2="${W-m.r}" y1="${sy(v)}" y2="${sy(v)}" stroke="var(--line)"/><text x="${m.l-8}" y="${sy(v)+4}" text-anchor="end">${+v.toFixed(2)}%</text>`;
+  const xs_ = nice(x1); for (let v = 0; v <= x1; v += xs_) g += `<text x="${sx(v)}" y="${H-m.b+18}" text-anchor="middle">${+v.toFixed(2)}</text>`;
+  g += `<text x="${W-m.r}" y="${H-4}" text-anchor="end">duration modificada (años)</text>`;
+  for (const sov of [true, false]) {
+    const s = pts.filter(p => p.sov === sov).sort((a,b)=>a.md-b.md), col = sov ? 'var(--s1)' : 'var(--s2)';
+    if (s.length > 1) g += `<polyline fill="none" stroke="${col}" stroke-width="1.2" stroke-opacity=".35" points="${s.map(p=>`${sx(p.md)},${sy(p.tir*100)}`).join(' ')}"/>`;
+    g += s.map((p,i) => `<circle cx="${sx(p.md)}" cy="${sy(p.tir*100)}" r="4" fill="${col}"><title>${esc(p.tk)} · ${esc(p.name)}: ${pct(p.tir)} · MD ${nf(p.md)}</title></circle>
+      <text x="${sx(p.md)+6}" y="${sy(p.tir*100)+(i%2?13:-6)}" style="fill:${col}">${esc(p.tk)}</text>`).join('');
+  }
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Curva de rendimientos">${g}</svg>`;
+}
+
+/* ---------- Filtros (se guardan por navegador y valen para todas las pestañas) ---------- */
+const F0 = { scope:'all', issuer:'', y0:'', y1:'', q:'', tir:false };
+let F = { ...F0 }, ALLYEARS = [];
+try { F = { ...F0, ...JSON.parse(localStorage.getItem('filters') || '{}') }; } catch {}
+const saveF = () => { try { localStorage.setItem('filters', JSON.stringify(F)); } catch {} };
+const issuerName = s => s === '?' ? 'Sin dato' : s;
+const year = r => r.mat ? +r.mat.slice(0, 4) : null;
+
+// Rellena los desplegables con lo que existe en la sección y descarta selecciones que ya no aplican.
+function syncFilterUI(inSec) {
+  const scoped = inSec.filter(r => F.scope === 'all' || (F.scope === 'nac') === r.sov);
+  const issuers = [...new Set(scoped.map(r => r.issuer))].sort((a,b) => a.localeCompare(b, 'es'));
+  if (!issuers.includes(F.issuer)) F.issuer = '';
+  const years = ALLYEARS; // todos los años del panel, así el rango no se pierde al cambiar de pestaña
+  const opts = (list, sel, all, lab = x => x) => `<option value="">${all}</option>` +
+    list.map(v => `<option value="${esc(v)}"${String(v) === String(sel) ? ' selected' : ''}>${esc(lab(v))}</option>`).join('');
+  document.getElementById('fIssuer').innerHTML = opts(issuers, F.issuer, 'Todos', issuerName);
+  document.getElementById('fY0').innerHTML = opts(years, F.y0, 'cualquier año');
+  document.getElementById('fY1').innerHTML = opts(years, F.y1, 'cualquier año');
+  document.querySelectorAll('#fScope button').forEach(b => b.classList.toggle('on', b.dataset.v === F.scope));
+  document.getElementById('fQ').value = F.q;
+  document.getElementById('fTir').checked = F.tir;
+}
+function applyFilters(inSec) {
+  syncFilterUI(inSec);
+  const q = F.q.trim().toLowerCase();
+  return inSec.filter(r =>
+    (F.scope === 'all' || (F.scope === 'nac') === r.sov) &&
+    (!F.issuer || r.issuer === F.issuer) &&
+    (!F.y0 || year(r) >= +F.y0) && (!F.y1 || year(r) <= +F.y1) &&
+    (!q || `${r.tk} ${r.sym || ''} ${r.name} ${r.issuer}`.toLowerCase().includes(q)) &&
+    (!F.tir || r.tir != null));
+}
+const setF = patch => { F = { ...F, ...patch }; saveF(); quotes && render(); };
+document.getElementById('fScope').addEventListener('click', e => { const v = e.target.closest('button')?.dataset.v; if (v) setF({ scope: v }); });
+document.getElementById('fIssuer').addEventListener('change', e => setF({ issuer: e.target.value }));
+document.getElementById('fY0').addEventListener('change', e => setF({ y0: e.target.value }));
+document.getElementById('fY1').addEventListener('change', e => setF({ y1: e.target.value }));
+document.getElementById('fTir').addEventListener('change', e => setF({ tir: e.target.checked }));
+let qT; document.getElementById('fQ').addEventListener('input', e => { clearTimeout(qT); qT = setTimeout(() => setF({ q: e.target.value }), 200); });
+document.getElementById('fClear').addEventListener('click', () => setF({ ...F0 }));
+
+/* ---------- Eventos ---------- */
+window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (SECTIONS.some(s=>s.id===h)) { tab = h; try { localStorage.setItem('tab', tab); } catch {} quotes && render(); } });
+document.getElementById('thead').addEventListener('click', e => { const k = e.target.closest('th')?.dataset.k; if (!k) return; sortDir = k === sortKey ? -sortDir : 1; sortKey = k; render(); });
+document.getElementById('thead').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.click(); });
+for (const id of ['esp','onlyVol']) document.getElementById(id).addEventListener('change', () => quotes && render());
+document.getElementById('refresh').addEventListener('click', load);
+load();
+setInterval(load, 15 * 60 * 1000);
+</script>
+</body>
+</html>

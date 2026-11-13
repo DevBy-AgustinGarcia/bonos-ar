@@ -41,7 +41,7 @@ def bcra_series(var_id, desde):
 
 def write(name, obj):
     """Escribe en un temporal y renombra, así la página nunca lee un archivo a medio escribir."""
-    DATA.mkdir(exist_ok=True)
+    DATA.mkdir(parents=True, exist_ok=True)
     tmp = DATA / (name + ".tmp")
     tmp.write_text(json.dumps(obj, separators=(",", ":")), encoding="utf-8")
     tmp.replace(DATA / name)

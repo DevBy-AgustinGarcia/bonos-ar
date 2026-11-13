@@ -56,22 +56,51 @@ def update_quotes():
 
 
 def update_indices(force=False):
-    # La antigüedad se lee de adentro del archivo: en GitHub el checkout pone la fecha de hoy a todos los archivos.
-    f = DATA / "indices.json"
-    try:
-        age = time.time() - json.loads(f.read_text(encoding="utf-8")).get("updated", 0)
-    except (OSError, ValueError):
-        age = float("inf")
-    if not force and age < INDICES_TTL * 3600:
+    if not force and age_of("indices.json") < INDICES_TTL * 3600:
         return False
     out = {key: bcra_series(var_id, desde) for var_id, (key, desde) in SERIES.items()}
     write("indices.json", {"updated": int(time.time()), **out})
     return True
 
 
+UST = ("https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/"
+       "{y}/all?type=daily_treasury_yield_curve&field_tdr_date_value={y}&page&_format=csv")
+# Columna del Tesoro de EE.UU. -> plazo en años
+UST_COLS = {"1 Mo": 1 / 12, "1.5 Month": 1.5 / 12, "2 Mo": 2 / 12, "3 Mo": .25, "4 Mo": 1 / 3, "6 Mo": .5, "1 Yr": 1,
+            "2 Yr": 2, "3 Yr": 3, "5 Yr": 5, "7 Yr": 7, "10 Yr": 10, "20 Yr": 20, "30 Yr": 30}
+
+
+def age_of(name):
+    """Segundos desde la última actualización guardada adentro del archivo (en GitHub el checkout pone la fecha de hoy)."""
+    try:
+        return time.time() - json.loads((DATA / name).read_text(encoding="utf-8")).get("updated", 0)
+    except (OSError, ValueError):
+        return float("inf")
+
+
+def update_ust(force=False):
+    """Curva de rendimientos del Tesoro de EE.UU. del último día publicado, para estimar el riesgo país."""
+    if not force and age_of("ust.json") < INDICES_TTL * 3600:
+        return False
+    import csv, io
+    rows = []
+    for y in (date.today().year, date.today().year - 1):  # en enero puede no haber datos del año nuevo
+        req = urllib.request.Request(UST.format(y=y), headers={"User-Agent": "panel-bonos/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            rows = list(csv.DictReader(io.StringIO(r.read().decode("utf-8"))))
+        if rows:
+            break
+    last = rows[0]  # el CSV viene del más nuevo al más viejo
+    m, d, y = last["Date"].split("/")
+    curve = [[t, float(last[c])] for c, t in UST_COLS.items() if last.get(c)]
+    write("ust.json", {"updated": int(time.time()), "date": f"{y}-{m}-{d}", "curve": curve})
+    return f"{y}-{m}-{d}"
+
+
 def main(force=False):
     ok = True
-    for name, fn in (("cotizaciones", update_quotes), ("indices", lambda: update_indices(force))):
+    for name, fn in (("cotizaciones", update_quotes), ("indices", lambda: update_indices(force)),
+                     ("tesoro EE.UU.", lambda: update_ust(force))):
         try:
             print(f"{name}: {fn()}")
         except Exception as e:  # una fuente caída no frena a la otra; queda el archivo anterior

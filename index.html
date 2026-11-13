@@ -71,6 +71,10 @@ tr.dim td{opacity:.55}
 .seg button{border:0;border-radius:0;border-right:1px solid var(--line)}
 .seg button:last-child{border-right:0}
 .seg button.on{background:var(--accent);color:var(--bg)}
+.an{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr))}
+.an .panel table{min-width:0}
+.an .big{font:500 20px var(--mono);color:var(--fg)}
+[hidden]{display:none!important}
 .err-box{color:var(--down);font-size:13px;margin-top:8px}
 </style>
 </head>
@@ -92,7 +96,7 @@ tr.dim td{opacity:.55}
   <section class="kpis" id="kpis"></section>
   <nav class="tabs" id="tabs"></nav>
 
-  <section class="filters" aria-label="Filtros">
+  <section class="filters bv" aria-label="Filtros">
     <div class="seg" id="fScope" role="group" aria-label="Emisor">
       <button type="button" data-v="all">Todos</button><button type="button" data-v="nac">Nacionales</button><button type="button" data-v="sub">Provinciales y municipales</button>
     </div>
@@ -105,16 +109,18 @@ tr.dim td{opacity:.55}
     <span id="fCount" class="sub"></span>
   </section>
 
-  <section class="panel">
+  <section class="panel bv">
     <div class="phead"><h2 id="ptitle"></h2><div class="legend"><span><i style="background:var(--s1)"></i>Nación / BCRA</span><span><i style="background:var(--s2)"></i>Provincias y municipios</span></div></div>
     <p class="desc" id="pdesc"></p>
     <div id="chart" class="scroll"></div>
   </section>
 
-  <section class="panel">
+  <section class="panel bv">
     <div class="scroll"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
     <div id="err" class="err-box"></div>
   </section>
+
+  <div id="an" class="an" hidden></div>
 
   <section class="notes">
     <div>Fuentes: cotizaciones de data912.com (gratuito, con demora); CER, TAMAR, BADLAR y A3500 de la API del BCRA; condiciones de emisión de las fichas técnicas de BYMA. Se actualiza solo cada 15 minutos.</div>
@@ -124,8 +130,9 @@ tr.dim td{opacity:.55}
 </div>
 
 <script src="engine.js"></script>
+<script src="analysis.js"></script>
 <script>
-const E = window.BondEngine;
+const E = window.BondEngine, A = window.BondAnalysis;
 const SECTIONS = [
   { id:'cer',    g:'CER',    title:'Ajustables por CER',  tir:'TIR real',      desc:'Capital ajustado por inflación (CER). La TIR es el rendimiento por encima de la inflación.' },
   { id:'tamar',  g:'TAMAR',  title:'Tasa TAMAR',          tir:'TEA proy.',     desc:'Pagan la tasa TAMAR de bancos privados (más un margen). La TIR supone que la TAMAR de hoy se mantiene.' },
@@ -134,8 +141,9 @@ const SECTIONS = [
   { id:'hd',     g:'HD',     title:'Hard dólar',          tir:'TIR US$',       desc:'Pagan en dólares billete. Soberanos, BOPREAL, provincias y CABA. Precio en la especie D (MEP) o C (cable).' },
   { id:'letras', g:'LETRAS', title:'Letras y tasa fija',  tir:'TEA',           desc:'Lecaps, Boncaps y bonos a tasa fija en pesos. TNA y TEM sobre el pago final.' },
   { id:'otros',  g:'OTROS',  title:'Otros',               tir:'TIR',           desc:'BADLAR, cupones PBI y otros instrumentos.' },
+  { id:'analisis', title:'Análisis' },
 ];
-let CAT = [], quotes = null, idx = null, lastOk = null, sortKey = 'md', sortDir = 1;
+let CAT = [], quotes = null, idx = null, ust = null, lastOk = null, sortKey = 'md', sortDir = 1;
 let tab = (location.hash || '').slice(1);
 try { if (!SECTIONS.some(s => s.id === tab)) tab = localStorage.getItem('tab') || 'hd'; } catch { tab = tab || 'hd'; }
 
@@ -158,8 +166,9 @@ async function load() {
   setStatus('load', 'Actualizando…');
   try {
     if (location.protocol === 'file:') throw new Error('abrí el panel desde un servidor (python server.py y http://localhost:8020)');
-    const [c, q, i] = await Promise.all([CAT.length ? CAT : getJSON('catalog.json'), getQuotes(), getJSON('data/indices.json')]);
-    CAT = c; quotes = Object.fromEntries(q.map(x => [x.symbol, x])); idx = i; lastOk = new Date();
+    const [c, q, i, u] = await Promise.all([CAT.length ? CAT : getJSON('catalog.json'), getQuotes(), getJSON('data/indices.json'),
+                                            getJSON('data/ust.json').catch(() => null)]);
+    CAT = c; ust = u; quotes = Object.fromEntries(q.map(x => [x.symbol, x])); idx = i; lastOk = new Date();
     document.getElementById('err').textContent = '';
     render();
   } catch (e) {
@@ -227,16 +236,21 @@ function render(stale) {
     ['MEP (AL30)', '$ ' + nf(mep)], ['CCL (GD30)', '$ ' + nf(ccl)], ['A3500', '$ ' + nf(ctx.a3500Now)],
     ['TAMAR priv. TNA', nf(ctx.tamarNow) + '%'], ['BADLAR priv. TNA', nf(ctx.badlarNow) + '%'],
     ['CER (liquidación)', nf(ctx.cerLag(settle), 4)],
+    ['Riesgo país est.', nf(A.countryRisk(rows, ust).embi, 0) + ' pb'],
   ].map(([l,v]) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
 
   // Pestañas con cantidad de instrumentos
   document.getElementById('tabs').innerHTML = SECTIONS.map(s =>
-    `<a href="#${s.id}" class="${s.id===tab?'on':''}">${s.title}<span>${rows.filter(r => r.b.group === s.g).length}</span></a>`).join('');
+    `<a href="#${s.id}" class="${s.id===tab?'on':''}">${s.title}${s.g ? `<span>${rows.filter(r => r.b.group === s.g).length}</span>` : ''}</a>`).join('');
 
   const sec = SECTIONS.find(s => s.id === tab);
+  const isAn = !sec.g;
+  document.querySelectorAll('.bv').forEach(el => el.hidden = isAn);
+  document.getElementById('an').hidden = !isAn;
+  document.getElementById('espWrap').hidden = sec.g !== 'HD' && !isAn;
+  if (isAn) return renderAnalysis(rows, ctx);
   document.getElementById('ptitle').textContent = sec.title + ': ' + sec.tir + ' vs duration modificada';
   document.getElementById('pdesc').textContent = sec.desc;
-  document.getElementById('espWrap').hidden = sec.g !== 'HD';
   const onlyVol = document.getElementById('onlyVol').checked;
   const inSec = rows.filter(r => r.b.group === sec.g);
   ALLYEARS = [...new Set(rows.map(year).filter(Boolean))].sort((a,b) => a-b);
@@ -280,6 +294,72 @@ function drawChart(pts) {
       <text x="${sx(p.md)+6}" y="${sy(p.tir*100)+(i%2?13:-6)}" style="fill:${col}">${esc(p.tk)}</text>`).join('');
   }
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Curva de rendimientos">${g}</svg>`;
+}
+
+/* ---------- Pestaña Análisis ---------- */
+const bps = v => v == null || !isFinite(v) ? '—' : nf(v, 0) + ' pb';
+// Tabla simple: cols = [[título, fila => html, clase]]
+const tbl = (cols, rows) => `<div class="scroll"><table><thead><tr>${cols.map(([h,,c]) => `<th class="${c||''}" style="cursor:default">${h}</th>`).join('')}</tr></thead>
+  <tbody>${rows.map(r => `<tr class="${r.dim ? 'dim' : ''}">${cols.map(([,f,c]) => `<td class="${c||''}">${f(r)}</td>`).join('')}</tr>`).join('')
+  || `<tr><td class="l" colspan="${cols.length}">Sin datos suficientes.</td></tr>`}</tbody></table></div>`;
+// Gráfico chico de un valor contra duration. series = [{pts:[[x, y, etiqueta]], color, line}]
+function miniChart(series, yfmt) {
+  const all = series.flatMap(s => s.pts).filter(p => p[1] != null && isFinite(p[1]));
+  if (all.length < 2) return '';
+  const W = 560, H = 190, m = {l:56,r:14,t:12,b:26};
+  const x1 = Math.max(...all.map(p=>p[0])) * 1.06;
+  let y0 = Math.min(...all.map(p=>p[1])), y1 = Math.max(...all.map(p=>p[1]));
+  const pad = (y1-y0)*0.15 || Math.abs(y1)*0.1 || 1; y0 -= pad; y1 += pad;
+  const sx = v => m.l + v/x1*(W-m.l-m.r), sy = v => H-m.b - (v-y0)/(y1-y0)*(H-m.t-m.b);
+  let g = '';
+  for (let k = 0; k <= 4; k++) { const v = y0 + (y1-y0)*k/4; g += `<line x1="${m.l}" x2="${W-m.r}" y1="${sy(v)}" y2="${sy(v)}" stroke="var(--line)"/><text x="${m.l-6}" y="${sy(v)+4}" text-anchor="end">${yfmt(v)}</text>`; }
+  const step = x1 > 4 ? 1 : x1 > 1.5 ? 0.5 : 0.25;
+  for (let v = 0; v <= x1 * 0.8; v += step) g += `<text x="${sx(v)}" y="${H-m.b+14}" text-anchor="middle">${+v.toFixed(2)}</text>`;
+  g += `<text x="${W-m.r}" y="${H-m.b+14}" text-anchor="end">duration (años)</text>`;
+  for (const s of series) {
+    const pts = s.pts.filter(p => p[1] != null && isFinite(p[1]));
+    if (s.line && pts.length > 1) g += `<polyline fill="none" stroke="${s.color}" stroke-width="1.5" stroke-opacity=".5" points="${pts.map(p=>`${sx(p[0])},${sy(p[1])}`).join(' ')}"/>`;
+    if (!s.noDots) g += pts.map(p => `<circle cx="${sx(p[0])}" cy="${sy(p[1])}" r="3.5" fill="${s.color}"><title>${esc(p[2])}: ${yfmt(p[1])}</title></circle>`).join('');
+  }
+  return `<div class="scroll"><svg viewBox="0 0 ${W} ${H}" width="100%" role="img">${g}</svg></div>`;
+}
+const anPanel = (title, desc, body) => `<section class="panel"><div class="phead"><h2>${title}</h2></div><p class="desc">${desc}</p>${body}</section>`;
+
+function renderAnalysis(rows, ctx) {
+  const fixed = A.fixedCurve(rows);
+  const tk = r => `<b>${esc(r.tk)}</b>`, md = r => nf(r.md), vto = r => fdate(r.mat);
+  const warn = t => CAT.find(b => b.tk === t)?.ok === false ? ' <span class="warn" title="Condiciones incompletas o supuestas">⚠</span>' : '';
+  const inf = A.inflation(rows, fixed), dev = A.devaluation(rows, fixed, ctx.a3500Now),
+        tam = A.tamarBreakeven(rows, fixed, ctx, E), law = A.lawSpread(rows), cr = A.countryRisk(rows, ust);
+  const inf1 = A.interp(inf.filter(r => r.be != null).map(r => [r.md, r.monthly]), 1);
+  const tamMax = tam.length ? Math.max(...tam.map(r => r.md)) : 0;
+  document.getElementById('an').innerHTML = [
+    anPanel('Inflación implícita',
+      `La inflación que iguala un bono CER con uno a tasa fija del mismo plazo. Si esperás más inflación conviene CER; si esperás menos, tasa fija.${inf1 != null ? ` A un año: <b>${pct(inf1)}</b> mensual.` : ''} Sin dato cuando la curva a tasa fija no llega a ese plazo.`,
+      miniChart([{ pts: inf.map(r => [r.md, r.monthly == null ? null : r.monthly*100, r.tk]), color:'var(--s1)', line:true }], v => nf(v,2)+'%') +
+      tbl([['Bono',r=>tk(r)+warn(r.tk),'l'],['Vto.',vto],['Dur.',md],['TIR real',r=>pct(r.tir)],['Tasa fija',r=>pct(r.iFix)],['Anual',r=>pct(r.be)],['Mensual',r=>`<b>${pct(r.monthly)}</b>`]],
+          inf.map(r => ({...r, dim: r.be == null})))),
+    anPanel('Devaluación implícita',
+      `Cuánto tiene que subir el dólar oficial (A3500, hoy $ ${nf(ctx.a3500Now)}) para que un dollar linked rinda lo mismo que tasa fija. El dólar de equilibrio es el A3500 al vencimiento que iguala ambas.`,
+      miniChart([{ pts: dev.map(r => [r.md, r.dev == null ? null : r.dev*100, r.tk]), color:'var(--s1)', line:true }], v => nf(v,1)+'%') +
+      tbl([['Bono',r=>tk(r)+warn(r.tk),'l'],['Vto.',vto],['Dur.',md],['TIR US$',r=>pct(r.tir)],['Tasa fija',r=>pct(r.iFix)],['Deval. anual',r=>pct(r.dev)],['Dólar equilibrio',r=>`<b>${r.fx ? '$ ' + nf(r.fx,0) : '—'}</b>`]],
+          dev.map(r => ({...r, dim: r.dev == null})))),
+    anPanel('TAMAR implícita',
+      `La TAMAR (TNA) promedio que tiene que regir hasta el vencimiento para que el bono rinda lo mismo que tasa fija. Hoy está en ${nf(ctx.tamarNow)}% (línea gris): si esperás que quede por encima de la implícita, conviene el bono TAMAR. Los provinciales con poco volumen dan valores erráticos.`,
+      miniChart([{ pts: [[0, ctx.tamarNow, 'TAMAR hoy'], [tamMax, ctx.tamarNow, 'TAMAR hoy']], color:'var(--muted)', line:true, noDots:true },
+                 { pts: tam.filter(r=>r.issuer==='Nación').map(r => [r.md, r.be, r.tk]), color:'var(--s1)' },
+                 { pts: tam.filter(r=>r.issuer!=='Nación').map(r => [r.md, r.be, r.tk]), color:'var(--s2)' }], v => nf(v,1)+'%') +
+      tbl([['Bono',r=>tk(r)+warn(r.tk),'l'],['Emisor',r=>esc(r.issuer),'l'],['Vto.',vto],['Dur.',md],['TEA proy.',r=>pct(r.tir)],['Tasa fija',r=>pct(r.iFix)],['TAMAR implícita',r=>`<b>${r.be == null ? '—' : nf(r.be)+'%'}</b>`]],
+          tam.map(r => ({...r, dim: r.be == null})))),
+    anPanel('Ley argentina vs ley Nueva York',
+      'Diferencia de TIR entre cada Bonar (ley argentina) y su Global (ley Nueva York), que tienen los mismos pagos. Un spread alto indica que el mercado cobra más por el riesgo de jurisdicción.',
+      tbl([['Par',r=>`<b>${r.ar}</b> / ${r.ny}`,'l'],['Dur.',md],['Precio AL',r=>nf(r.pxAr)],['Precio GD',r=>nf(r.pxNy)],['TIR Bonar',r=>pct(r.tirAr)],['TIR Global',r=>pct(r.tirNy)],['Spread',r=>`<b>${bps(r.bps)}</b>`]], law)),
+    anPanel('Riesgo país estimado',
+      `Spread de cada soberano en dólares contra el Tesoro de EE.UU. al mismo plazo (curva del ${fdate(cr.date)}). Promedio de los Globales: <span class="big">${bps(cr.embi)}</span>. Es una aproximación, no el índice oficial de JP Morgan.`,
+      miniChart([{ pts: cr.rows.filter(r=>r.ny).map(r => [r.md, r.bps, r.tk]), color:'var(--s1)', line:true },
+                 { pts: cr.rows.filter(r=>!r.ny).map(r => [r.md, r.bps, r.tk]), color:'var(--s2)' }], v => nf(v,0)) +
+      tbl([['Bono',r=>tk(r)+warn(r.tk),'l'],['Ley',r=>r.ny?'NY':'AR','l'],['Vto.',vto],['Dur.',md],['TIR',r=>pct(r.tir)],['Tesoro EE.UU.',r=>pct(r.ust)],['Spread',r=>`<b>${bps(r.bps)}</b>`]], cr.rows)),
+  ].join('');
 }
 
 /* ---------- Filtros (se guardan por navegador y valen para todas las pestañas) ---------- */

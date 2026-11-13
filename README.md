@@ -13,7 +13,7 @@ Abrir http://localhost:8020. No necesita instalar nada (sólo Python 3).
 ## Archivos
 
 - `update.py`: baja cotizaciones (data912) e índices del BCRA (CER, TAMAR, BADLAR, A3500) y la curva del Tesoro de EE.UU. a `data/`. El BCRA no permite pedidos desde el navegador, por eso se guardan como archivo.
-- `analysis.js`: pestaña Análisis: inflación, devaluación y TAMAR implícitas, spread ley AR/NY y riesgo país estimado.
+- `analysis.js`: pestañas Análisis (inflación, devaluación y TAMAR implícitas, spread ley AR/NY, riesgo país) y Escenarios (cambios de tasa, CER con inflación esperada del REM).
 - `snapshot.js`: guarda una foto de precio y TIR de cada bono en `data/history/AAAA-MM.csv`.
 - `server.py`: servidor local que corre `update.py` cada 15 minutos (datos en `.local/data/`).
 - `.github/workflows/actualizar.yml`: en GitHub corre lo mismo cada 15 min en horario de mercado y publica en Pages.

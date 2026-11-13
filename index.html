@@ -94,6 +94,9 @@ dialog#ficha::backdrop{background:rgba(0,0,0,.45)}
 .calc label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
 .calc input{font:500 14px var(--mono);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;width:200px}
 tr.tot td{font-weight:600;border-top:2px solid var(--line)}
+.an1{display:grid;gap:16px}
+.an1 .panel table{min-width:0}
+.mono{font-family:var(--mono)}
 .err-box{color:var(--down);font-size:13px;margin-top:8px}
 </style>
 </head>
@@ -142,6 +145,7 @@ tr.tot td{font-weight:600;border-top:2px solid var(--line)}
 
   <div id="an" class="an" hidden></div>
   <div id="cal" hidden></div>
+  <div id="esc" class="an1" hidden></div>
   <dialog id="ficha" aria-label="Ficha del bono"><div class="fbody"></div></dialog>
 
   <section class="notes">
@@ -164,6 +168,7 @@ const SECTIONS = [
   { id:'letras', g:'LETRAS', title:'Letras y tasa fija',  tir:'TEA',           desc:'Lecaps, Boncaps y bonos a tasa fija en pesos. TNA y TEM sobre el pago final.' },
   { id:'otros',  g:'OTROS',  title:'Otros',               tir:'TIR',           desc:'BADLAR, cupones PBI y otros instrumentos.' },
   { id:'analisis', title:'Análisis', view:'an' },
+  { id:'escenarios', title:'Escenarios', view:'esc' },
   { id:'calendario', title:'Calendario', view:'cal' },
 ];
 let LAST = {}; // última vista calculada: filas, contexto y tabla visible (para CSV, ficha y calendario)
@@ -273,9 +278,11 @@ function render(stale) {
   document.querySelectorAll('.bv').forEach(el => el.hidden = view !== 'bv');
   document.getElementById('an').hidden = view !== 'an';
   document.getElementById('cal').hidden = view !== 'cal';
+  document.getElementById('esc').hidden = view !== 'esc';
   document.getElementById('espWrap').hidden = !(sec.g === 'HD' || view !== 'bv');
   if (view === 'an') return renderAnalysis(rows, ctx);
   if (view === 'cal') return renderCalendar(rows);
+  if (view === 'esc') return renderScenarios(rows, ctx, settle);
   document.getElementById('ptitle').textContent = sec.title + ': ' + sec.tir + ' vs duration modificada';
   document.getElementById('pdesc').textContent = sec.desc;
   const onlyVol = document.getElementById('onlyVol').checked;
@@ -487,7 +494,7 @@ function openFicha(tk) {
     </div>
     <div id="cOut" class="calc-out"></div>
     <h3>Flujo de fondos</h3>${projNote(r) ? `<p class="desc">${projNote(r)}</p>` : ''}
-    <div class="scroll"><table class="flows"><thead><tr><th class="l">Fecha</th><th>Renta</th><th>Amortización</th><th>Total c/100 VN</th><th>Cobrás</th></tr></thead><tbody id="cFlows"></tbody></table></div>`
+    <div class="scroll"><table class="flows"><thead><tr><th class="l">Fecha</th><th>Renta</th><th>Amortización</th><th>Total c/100 VN</th><th>Cobrás</th></tr></thead><tbody id="cFlows"></tbody></table></div>${sensTable(r)}`
     : '<p class="desc">No hay flujo calculable para este instrumento (sin precio o con condiciones incompletas).</p>'}`;
   if (!dlg.open) dlg.showModal();
   if (r.flows) calcFicha();
@@ -517,6 +524,71 @@ document.getElementById('cal').addEventListener('click', e => {
   downloadCSV(`pagos-${E.iso(new Date())}.csv`, ['Fecha','Bono','Tipo','Emisor','Moneda','Renta','Amortización','Total','Proyectado'],
     LAST.cal.map(p => [p.date, p.tk, groupTitle(p.group), p.issuer, p.unit, p.interest, p.amort, p.amt, p.projected ? 'sí' : 'no']));
 });
+
+/* ---------- Pestaña Escenarios ---------- */
+const ESC = { g: 'HD', bps: 100, pi: null }; // pi: inflación mensual en %, null = la del REM
+const remInfo = () => { const a = idx?.rem12; if (!a?.length) return null; const [d, v] = a[a.length - 1]; return { d, annual: v, monthly: (Math.pow(1 + v / 100, 1 / 12) - 1) * 100 }; };
+function renderScenarios(rows, ctx, settle) {
+  const el = document.getElementById('esc');
+  const rem = remInfo(), piM = ESC.pi ?? rem?.monthly ?? 2;
+  const lastInf = idx?.inflacion?.length ? idx.inflacion[idx.inflacion.length - 1] : null;
+  const shock = A.rateShock(rows, ESC.g, ESC.bps, settle, E);
+  const fixed = A.fixedCurve(rows);
+  const cer = A.cerScenario(rows, fixed, idx.cer, settle, piM / 100, E);
+  const sign = v => (v > 0 ? '+' : '') + nf(v, 0);
+  const groups = SECTIONS.filter(s => s.g);
+  const verdict = r => r.diff == null ? '—' : r.diff > 0 ? `<span class="up">CER ${sign(r.diff)} pb</span>` : `<span class="down">Fija ${sign(-r.diff)} pb</span>`;
+  el.innerHTML = `
+  <section class="panel">
+    <div class="phead"><h2>Si cambian las tasas</h2>
+      <div class="filters">
+        <label>Sección <select id="escG">${groups.map(s => `<option value="${s.g}"${s.g === ESC.g ? ' selected' : ''}>${esc(s.title)}</option>`).join('')}</select></label>
+        <label>Movimiento de TIR <input type="range" id="escB" min="-500" max="500" step="25" value="${ESC.bps}"> <b class="mono">${sign(ESC.bps)} pb</b></label>
+      </div></div>
+    <p class="desc">Cuánto cambia el precio de cada bono si su TIR sube o baja esa cantidad de puntos básicos (100 pb = 1 punto). Cuanto más larga la duration, más se mueve el precio. La aproximación por duration es −duration × cambio de tasa.</p>
+    ${miniChart([{ pts: shock.map(r => [r.md, r.chg * 100, r.tk]), color: ESC.bps > 0 ? 'var(--down)' : 'var(--up)' }], v => nf(v, 1) + '%')}
+    ${tbl([['Bono', r => `<button type="button" class="lnk" data-tk="${esc(r.tk)}">${esc(r.tk)}</button>`, 'l'], ['Vto.', r => fdate(r.mat)], ['Dur.', r => nf(r.md)],
+           ['TIR hoy', r => pct(r.tir)], ['TIR nueva', r => pct(r.tir + ESC.bps / 1e4)], ['Precio hoy', r => nf(r.price)], ['Precio nuevo', r => nf(r.px)],
+           ['Variación', r => `<b class="${r.chg >= 0 ? 'up' : 'down'}">${r.chg >= 0 ? '+' : ''}${pct(r.chg)}</b>`], ['Aprox. duration', r => pct(r.approx)]], shock)}
+  </section>
+  <section class="panel">
+    <div class="phead"><h2>CER con inflación esperada</h2>
+      <div class="filters">
+        <label>Inflación mensual (%) <input type="number" id="escPi" step="0.05" min="-5" max="30" value="${+piM.toFixed(2)}" style="width:90px"></label>
+        ${rem ? `<button type="button" id="escRem">Usar REM</button>` : ''}
+      </div></div>
+    <p class="desc">Proyecta el CER con esa inflación desde el último dato publicado y calcula cuánto rinde cada bono CER en pesos, para compararlo con la tasa fija al mismo plazo.
+      ${rem ? `El REM del BCRA (${fdate(rem.d)}) espera ${nf(rem.annual, 1)}% para los próximos 12 meses: ${nf(rem.monthly)}% mensual.` : ''}
+      ${lastInf ? ` Último dato del INDEC: ${nf(lastInf[1], 1)}% (${E.D(lastInf[0]).toLocaleDateString('es-AR', { month: 'long', year: 'numeric', timeZone: 'UTC' })}).` : ''}
+      Con esta inflación: ${pct(Math.pow(1 + piM / 100, 12) - 1, 1)} anual.</p>
+    ${miniChart([{ pts: fixed.map(f => [f[0], f[1] * 100, f[2]]), color: 'var(--s2)', line: true },
+                 { pts: cer.map(r => [r.md, r.tirNom == null ? null : r.tirNom * 100, r.tk]), color: 'var(--s1)', line: true }], v => nf(v, 1) + '%')}
+    <div class="legend"><span><i style="background:var(--s1)"></i>CER en pesos (con la inflación supuesta)</span><span><i style="background:var(--s2)"></i>Tasa fija</span></div>
+    ${tbl([['Bono', r => `<button type="button" class="lnk" data-tk="${esc(r.tk)}">${esc(r.tk)}</button>`, 'l'], ['Vto.', r => fdate(r.mat)], ['Dur.', r => nf(r.md)],
+           ['TIR real', r => pct(r.tir)], ['TIR en pesos', r => `<b>${pct(r.tirNom)}</b>`], ['Tasa fija', r => pct(r.iFix)], ['Gana', verdict]],
+          cer.map(r => ({ ...r, dim: r.iFix == null })))}
+  </section>`;
+}
+document.getElementById('esc').addEventListener('input', e => {
+  // Mientras se arrastra sólo cambia la etiqueta; al soltar se recalcula (redibujar en cada paso cortaría el arrastre).
+  if (e.target.id === 'escB') e.target.nextElementSibling.textContent = (+e.target.value > 0 ? '+' : '') + e.target.value + ' pb';
+});
+document.getElementById('esc').addEventListener('change', e => {
+  if (e.target.id === 'escG') ESC.g = e.target.value;
+  else if (e.target.id === 'escB') ESC.bps = +e.target.value;
+  else if (e.target.id === 'escPi') { const v = parseFloat(e.target.value); ESC.pi = isFinite(v) ? v : null; }
+  else return;
+  renderScenarios(LAST.rows, LAST.ctx, LAST.settle);
+});
+document.getElementById('esc').addEventListener('click', e => { if (e.target.id === 'escRem') { ESC.pi = null; renderScenarios(LAST.rows, LAST.ctx, LAST.settle); } });
+
+// Sensibilidad en la ficha: precio del bono con la TIR movida ±50 a ±300 pb.
+function sensTable(r) {
+  if (!r.flows || r.tir == null) return '';
+  const rows = [-300, -200, -100, -50, 0, 50, 100, 200, 300].map(b => { const p = E.priceAtYield(r.flows, r.tir + b / 1e4, LAST.settle); return { b, tir: r.tir + b / 1e4, p, chg: p / r.price - 1 }; });
+  return `<h3>Si cambia la TIR</h3>${tbl([['Movimiento', x => x.b === 0 ? 'hoy' : (x.b > 0 ? '+' : '') + x.b + ' pb', 'l'], ['TIR', x => pct(x.tir)], ['Precio', x => nf(x.p)],
+    ['Variación', x => x.b === 0 ? '—' : `<span class="${x.chg >= 0 ? 'up' : 'down'}">${x.chg >= 0 ? '+' : ''}${pct(x.chg)}</span>`]], rows)}`;
+}
 
 /* ---------- Filtros (se guardan por navegador y valen para todas las pestañas) ---------- */
 const F0 = { scope:'all', issuer:'', y0:'', y1:'', q:'', tir:false };

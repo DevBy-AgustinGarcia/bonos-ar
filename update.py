@@ -18,7 +18,9 @@ from pathlib import Path
 DATA = Path(__file__).parent / "data"
 BCRA = "https://api.bcra.gob.ar/estadisticas/v4.0/monetarias/{id}?desde={desde}&hasta={hasta}&limit=3000"
 # id de variable BCRA -> (clave, desde cuándo hace falta la serie)
-SERIES = {30: ("cer", "2003-01-01"), 44: ("tamar", "2024-06-01"), 7: ("badlar", "2024-06-01"), 5: ("a3500", "2024-06-01")}
+SERIES = {30: ("cer", "2003-01-01"), 44: ("tamar", "2024-06-01"), 7: ("badlar", "2024-06-01"), 5: ("a3500", "2024-06-01"),
+          27: ("inflacion", "2024-01-01"),  # inflación mensual (INDEC), %
+          29: ("rem12", "2024-01-01")}      # REM: inflación esperada próximos 12 meses (mediana), %
 INDICES_TTL = 6  # horas: el BCRA publica una vez por día
 
 
@@ -56,7 +58,12 @@ def update_quotes():
 
 
 def update_indices(force=False):
-    if not force and age_of("indices.json") < INDICES_TTL * 3600:
+    try:  # si se agregó una serie nueva, se baja todo aunque el archivo sea reciente
+        have = set(json.loads((DATA / "indices.json").read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        have = set()
+    complete = {k for k, _ in SERIES.values()} <= have
+    if not force and complete and age_of("indices.json") < INDICES_TTL * 3600:
         return False
     out = {key: bcra_series(var_id, desde) for var_id, (key, desde) in SERIES.items()}
     write("indices.json", {"updated": int(time.time()), **out})

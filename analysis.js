@@ -85,6 +85,42 @@
     return { rows: out, embi: gd.length ? gd.reduce((s, r) => s + r.bps, 0) / gd.length : null, date: ust.date };
   }
 
-  const api = { interp, fixedCurve, inflation, devaluation, tamarBreakeven, lawSpread, countryRisk };
+  /* ---------- Escenarios ---------- */
+  // TIR (efectiva anual) que iguala un flujo con un precio, por bisección sobre E.priceAtYield.
+  function yieldOf(flows, price, settle, E) {
+    if (!flows?.length || !(price > 0)) return null;
+    let lo = -0.95, hi = 10;
+    if (E.priceAtYield(flows, hi, settle) > price || E.priceAtYield(flows, lo, settle) < price) return null;
+    for (let i = 0; i < 100; i++) { const m = (lo + hi) / 2; E.priceAtYield(flows, m, settle) > price ? lo = m : hi = m; }
+    return (lo + hi) / 2;
+  }
+
+  // Precio de cada bono si su TIR se mueve bps puntos básicos (mismo flujo, otra tasa de descuento).
+  function rateShock(rows, group, bps, settle, E) {
+    return rows.filter(r => r.b.group === group && r.flows?.length && r.tir != null && r.md > 0).map(r => {
+      const px = E.priceAtYield(r.flows, r.tir + bps / 1e4, settle);
+      return { tk: r.tk, mat: r.mat, md: r.md, tir: r.tir, price: r.price, px, chg: px / r.price - 1, approx: -r.md * bps / 1e4 };
+    }).sort((a, b) => a.md - b.md);
+  }
+
+  // Bonos CER con una inflación mensual supuesta: proyecta el CER desde el último dato publicado,
+  // pasa el flujo a pesos y calcula la TIR en pesos para compararla con la tasa fija al mismo plazo.
+  function cerScenario(rows, fixed, cerArr, settle, piM, E) {
+    const [lastD, lastV] = cerArr[cerArr.length - 1], last = E.D(lastD);
+    const look = d => { // CER del día d (dato publicado o proyectado)
+      if (d <= last) { let lo = 0, hi = cerArr.length - 1, k = d.toISOString().slice(0, 10), ans = cerArr[0][1];
+        while (lo <= hi) { const m = (lo + hi) >> 1; if (cerArr[m][0] <= k) { ans = cerArr[m][1]; lo = m + 1; } else hi = m - 1; } return ans; }
+      return lastV * Math.pow(1 + piM, (d - last) / 864e5 / (365 / 12));
+    };
+    const lag = d => look(E.addBD(d, -10)), base = lag(settle);
+    return rows.filter(r => r.b.group === 'CER' && r.b.issuer === 'Nación' && r.flows?.length && r.tir != null && r.md > 0).map(r => {
+      const nom = r.flows.map(f => ({ ...f, amt: f.amt * lag(f.date) / base }));
+      const tirNom = yieldOf(nom, r.price, settle, E), iFix = interp(fixed, r.md);
+      return { tk: r.tk, mat: r.mat, md: r.md, tir: r.tir, tirNom, iFix, diff: tirNom != null && iFix != null ? (tirNom - iFix) * 1e4 : null,
+               total: nom.reduce((s, f) => s + f.amt, 0) };
+    }).sort((a, b) => a.md - b.md);
+  }
+
+  const api = { yieldOf, rateShock, cerScenario, interp, fixedCurve, inflation, devaluation, tamarBreakeven, lawSpread, countryRisk };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.BondAnalysis = api;
 })(typeof window !== 'undefined' ? window : globalThis);

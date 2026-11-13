@@ -75,6 +75,25 @@ tr.dim td{opacity:.55}
 .an .panel table{min-width:0}
 .an .big{font:500 20px var(--mono);color:var(--fg)}
 [hidden]{display:none!important}
+.lnk{font:inherit;font-weight:600;color:var(--fg);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}
+.lnk:hover{color:var(--accent);text-decoration-color:var(--accent)}
+h3.month{font-size:13px;font-weight:600;margin:16px 0 4px;text-transform:capitalize}
+h3.month span{font:400 12px var(--mono);color:var(--muted);text-transform:none;margin-left:6px}
+table.cal,table.flows{min-width:560px}
+dialog#ficha{width:min(820px,calc(100vw - 32px));max-height:calc(100vh - 32px);border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--fg);padding:0}
+dialog#ficha::backdrop{background:rgba(0,0,0,.45)}
+.fbody{padding:18px;display:grid;gap:12px}
+.fhead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.fhead h2{margin:0;font-size:20px}
+.fbody h3{margin:6px 0 0;font-size:14px}
+.x{border:0;font-size:16px;padding:4px 8px}
+.kv,.calc-out{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 16px;margin:0}
+.kv dt,.calc-out dt{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.kv dd,.calc-out dd{margin:0;font:500 14px var(--mono)}
+.calc{display:flex;flex-wrap:wrap;gap:12px}
+.calc label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+.calc input{font:500 14px var(--mono);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;width:200px}
+tr.tot td{font-weight:600;border-top:2px solid var(--line)}
 .err-box{color:var(--down);font-size:13px;margin-top:8px}
 </style>
 </head>
@@ -107,6 +126,7 @@ tr.dim td{opacity:.55}
     <label class="chk"><input type="checkbox" id="fTir"> Sólo con TIR</label>
     <button type="button" id="fClear">Limpiar</button>
     <span id="fCount" class="sub"></span>
+    <button type="button" id="csv">Exportar CSV</button>
   </section>
 
   <section class="panel bv">
@@ -121,6 +141,8 @@ tr.dim td{opacity:.55}
   </section>
 
   <div id="an" class="an" hidden></div>
+  <div id="cal" hidden></div>
+  <dialog id="ficha" aria-label="Ficha del bono"><div class="fbody"></div></dialog>
 
   <section class="notes">
     <div>Fuentes: cotizaciones de data912.com (gratuito, con demora); CER, TAMAR, BADLAR y A3500 de la API del BCRA; condiciones de emisión de las fichas técnicas de BYMA. Se actualiza solo cada 15 minutos.</div>
@@ -141,8 +163,10 @@ const SECTIONS = [
   { id:'hd',     g:'HD',     title:'Hard dólar',          tir:'TIR US$',       desc:'Pagan en dólares billete. Soberanos, BOPREAL, provincias y CABA. Precio en la especie D (MEP) o C (cable).' },
   { id:'letras', g:'LETRAS', title:'Letras y tasa fija',  tir:'TEA',           desc:'Lecaps, Boncaps y bonos a tasa fija en pesos. TNA y TEM sobre el pago final.' },
   { id:'otros',  g:'OTROS',  title:'Otros',               tir:'TIR',           desc:'BADLAR, cupones PBI y otros instrumentos.' },
-  { id:'analisis', title:'Análisis' },
+  { id:'analisis', title:'Análisis', view:'an' },
+  { id:'calendario', title:'Calendario', view:'cal' },
 ];
+let LAST = {}; // última vista calculada: filas, contexto y tabla visible (para CSV, ficha y calendario)
 let CAT = [], quotes = null, idx = null, ust = null, lastOk = null, sortKey = 'md', sortDir = 1;
 let tab = (location.hash || '').slice(1);
 try { if (!SECTIONS.some(s => s.id === tab)) tab = localStorage.getItem('tab') || 'hd'; } catch { tab = tab || 'hd'; }
@@ -206,7 +230,7 @@ function columns(sec) {
 }
 function cell(r, k, sec) {
   switch (k) {
-    case 'tk': return `<td class="tk l">${esc(r.tk)}${r.b.ok === false ? ` <span class="warn" title="${esc(r.b.notes || 'Condiciones incompletas')}">⚠</span>` : ''}</td>`;
+    case 'tk': return `<td class="tk l"><button type="button" class="lnk" data-tk="${esc(r.tk)}">${esc(r.tk)}</button>${r.b.ok === false ? ` <span class="warn" title="${esc(r.b.notes || 'Condiciones incompletas')}">⚠</span>` : ''}</td>`;
     case 'name': return `<td class="nm l" title="${esc(r.issuer)} · ${esc(r.sym || '')}">${esc(r.name)}</td>`;
     case 'mat': return `<td>${fdate(r.mat)}</td>`;
     case 'days': return `<td>${r.days ?? '—'}</td>`;
@@ -244,11 +268,14 @@ function render(stale) {
     `<a href="#${s.id}" class="${s.id===tab?'on':''}">${s.title}${s.g ? `<span>${rows.filter(r => r.b.group === s.g).length}</span>` : ''}</a>`).join('');
 
   const sec = SECTIONS.find(s => s.id === tab);
-  const isAn = !sec.g;
-  document.querySelectorAll('.bv').forEach(el => el.hidden = isAn);
-  document.getElementById('an').hidden = !isAn;
-  document.getElementById('espWrap').hidden = sec.g !== 'HD' && !isAn;
-  if (isAn) return renderAnalysis(rows, ctx);
+  const view = sec.view || 'bv';
+  LAST = { rows, ctx, settle, sec };
+  document.querySelectorAll('.bv').forEach(el => el.hidden = view !== 'bv');
+  document.getElementById('an').hidden = view !== 'an';
+  document.getElementById('cal').hidden = view !== 'cal';
+  document.getElementById('espWrap').hidden = !(sec.g === 'HD' || view !== 'bv');
+  if (view === 'an') return renderAnalysis(rows, ctx);
+  if (view === 'cal') return renderCalendar(rows);
   document.getElementById('ptitle').textContent = sec.title + ': ' + sec.tir + ' vs duration modificada';
   document.getElementById('pdesc').textContent = sec.desc;
   const onlyVol = document.getElementById('onlyVol').checked;
@@ -265,6 +292,7 @@ function render(stale) {
   const sorted = [...data].sort((a,b) => { const x = val(a), y = val(b);
     if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
     return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
+  LAST.sorted = sorted;
   document.getElementById('tbody').innerHTML = sorted.map(r =>
     `<tr class="${r.tir == null ? 'dim' : ''}">${cols.map(([k]) => cell(r, k, sec)).join('')}</tr>`).join('')
     || `<tr><td class="l" colspan="${cols.length}">No hay instrumentos que cumplan los filtros en esta sección.</td></tr>`;
@@ -327,7 +355,7 @@ const anPanel = (title, desc, body) => `<section class="panel"><div class="phead
 
 function renderAnalysis(rows, ctx) {
   const fixed = A.fixedCurve(rows);
-  const tk = r => `<b>${esc(r.tk)}</b>`, md = r => nf(r.md), vto = r => fdate(r.mat);
+  const tk = r => `<button type="button" class="lnk" data-tk="${esc(r.tk)}">${esc(r.tk)}</button>`, md = r => nf(r.md), vto = r => fdate(r.mat);
   const warn = t => CAT.find(b => b.tk === t)?.ok === false ? ' <span class="warn" title="Condiciones incompletas o supuestas">⚠</span>' : '';
   const inf = A.inflation(rows, fixed), dev = A.devaluation(rows, fixed, ctx.a3500Now),
         tam = A.tamarBreakeven(rows, fixed, ctx, E), law = A.lawSpread(rows), cr = A.countryRisk(rows, ust);
@@ -361,6 +389,134 @@ function renderAnalysis(rows, ctx) {
       tbl([['Bono',r=>tk(r)+warn(r.tk),'l'],['Ley',r=>r.ny?'NY':'AR','l'],['Vto.',vto],['Dur.',md],['TIR',r=>pct(r.tir)],['Tesoro EE.UU.',r=>pct(r.ust)],['Spread',r=>`<b>${bps(r.bps)}</b>`]], cr.rows)),
   ].join('');
 }
+
+/* ---------- Exportar CSV (separador ; y coma decimal, para abrir directo en Excel en español) ---------- */
+function downloadCSV(name, header, lines) {
+  const cellOf = v => v == null || (typeof v === 'number' && !isFinite(v)) ? '' :
+    v instanceof Date ? E.iso(v) : typeof v === 'number' ? String(+v.toFixed(6)).replace('.', ',') :
+    /[;"\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+  const text = '﻿' + [header, ...lines].map(l => l.map(cellOf).join(';')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const CSV_COLS = [['tk','Bono'],['name','Nombre'],['issuer','Emisor'],['sym','Especie'],['mat','Vencimiento'],['days','Días'],['price','Precio'],['chg','Var. %',v=>v*100],
+  ['vt','Valor técnico'],['parity','Paridad %',v=>v*100],['tir','TIR %',v=>v*100],['md','Duration mod.'],['tna','TNA %',v=>v*100],['tem','TEM %',v=>v*100],
+  ['leg','Pata'],['rate','Cupón %'],['nextDate','Próximo pago'],['nextAmt','Monto próximo pago'],['vol','Volumen']];
+function exportTable() {
+  if (!LAST.sorted) return;
+  const f = (r, [k,, fn]) => r[k] == null ? null : fn ? fn(r[k]) : r[k];
+  downloadCSV(`bonos-${LAST.sec.id}-${E.iso(new Date())}.csv`, CSV_COLS.map(c => c[1]), LAST.sorted.map(r => CSV_COLS.map(c => f(r, c))));
+}
+
+/* ---------- Calendario de pagos ---------- */
+const groupTitle = g => SECTIONS.find(s => s.g === g)?.title || g;
+function calendarRows(rows, horizon, group) {
+  const until = Date.now() + horizon * 864e5, out = [];
+  for (const r of rows) {
+    if (!r.flows || (group && r.b.group !== group)) continue;
+    for (const f of r.flows) if (+f.date <= until)
+      out.push({ date: f.date, tk: r.tk, name: r.name, issuer: r.issuer, group: r.b.group, unit: r.unit, interest: f.interest, amort: f.amort, amt: f.amt, projected: r.projected || r.b.cer || r.b.kind === 'float' });
+  }
+  return out.sort((a, b) => a.date - b.date || a.tk.localeCompare(b.tk));
+}
+function renderCalendar(rows) {
+  const el = document.getElementById('cal');
+  const H = +(document.getElementById('calH')?.value || 90), G = document.getElementById('calG')?.value || '';
+  const list = calendarRows(rows, H, G);
+  LAST.cal = list;
+  const groups = [...new Set(rows.map(r => r.b.group))];
+  const byMonth = {};
+  for (const p of list) (byMonth[E.iso(p.date).slice(0, 7)] ||= []).push(p);
+  const monthName = k => E.D(k + '-01').toLocaleDateString('es-AR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const unitLbl = u => u === 'ARS' ? '$' : 'US$';
+  el.innerHTML = `<section class="panel">
+    <div class="phead"><h2>Calendario de pagos</h2>
+      <div class="filters">
+        <label>Próximos <select id="calH">${[30,90,180,365].map(d => `<option value="${d}"${d===H?' selected':''}>${d} días</option>`).join('')}</select></label>
+        <label>Tipo <select id="calG"><option value="">Todos</option>${groups.map(g => `<option value="${g}"${g===G?' selected':''}>${esc(groupTitle(g))}</option>`).join('')}</select></label>
+        <button type="button" id="calCsv">Exportar CSV</button>
+      </div></div>
+    <p class="desc">Pagos de renta y amortización por cada 100 de valor nominal original, en la moneda en que cotiza el bono. Los CER se muestran con el coeficiente de hoy y los de tasa variable con la tasa de hoy (*: proyectado). Tocá un bono para ver su ficha.</p>
+    ${Object.keys(byMonth).map(k => `<h3 class="month">${monthName(k)} <span>${byMonth[k].length} pagos</span></h3>
+      <div class="scroll"><table class="cal"><thead><tr><th class="l">Fecha</th><th class="l">Bono</th><th class="l">Tipo</th><th class="l">Emisor</th><th>Renta</th><th>Amortización</th><th>Total</th></tr></thead><tbody>
+      ${byMonth[k].map(p => `<tr><td class="l">${fdate(p.date)}</td><td class="tk l"><button type="button" class="lnk" data-tk="${esc(p.tk)}">${esc(p.tk)}</button></td>
+        <td class="l">${esc(groupTitle(p.group))}</td><td class="l nm">${esc(p.issuer)}</td>
+        <td>${nf(p.interest, 3)}</td><td>${nf(p.amort, 3)}</td><td><b>${unitLbl(p.unit)} ${nf(p.amt, 3)}</b>${p.projected ? '*' : ''}</td></tr>`).join('')}
+      </tbody></table></div>`).join('') || '<p class="desc">No hay pagos en ese plazo.</p>'}
+  </section>`;
+}
+
+/* ---------- Ficha por bono ---------- */
+const KIND = {
+  fixed: b => b.cer ? 'Ajustable por CER con cupón' : (b.steps?.length > 1 ? 'Cupón escalonado (step-up)' : 'Cupón fijo'),
+  float: b => `Tasa variable: ${b.index || 'TAMAR'}${b.spread ? ` + ${nf(b.spread)}%` : ''}`,
+  cap_fixed: b => `Capitalizable a tasa fija (TEM ${nf(b.tem, 3)}%)`,
+  zero_cer: () => 'Cupón cero ajustable por CER', zero_dl: () => 'Cupón cero dollar linked (A3500)',
+  cap_tamar: b => `Capitalizable TAMAR${b.spread ? ` + ${nf(b.spread)}%` : ''}`,
+  dual_fixed_tamar: b => `Dual: tasa fija (TEM ${nf(b.tem, 3)}%) o TAMAR, la mayor`,
+  dual_cer_tamar: () => 'Dual: CER o TAMAR, la mayor', dual_tamar_dl: () => 'Dual: TAMAR o dólar oficial, la mayor',
+  none: () => 'Condiciones no disponibles',
+};
+let FICHA = null;
+// Qué supuesto hay detrás de los montos proyectados, según el tipo de bono.
+const projNote = r => r.b.group === 'CER' ? 'Montos en pesos de hoy: a cada pago se le suma la inflación (CER) que haya hasta esa fecha.'
+  : r.b.group === 'DL' ? 'Montos al dólar oficial (A3500) de hoy: cambian con el tipo de cambio al vencimiento.'
+  : r.projected || r.b.kind === 'float' ? 'Proyectado con la tasa de hoy (TAMAR, BADLAR o la pata que va ganando); el monto final puede variar.' : '';
+function openFicha(tk) {
+  const r = LAST.rows?.find(x => x.tk === tk); if (!r) return;
+  FICHA = r;
+  const b = r.b, cur = r.unit === 'ARS' ? '$' : 'US$', dlg = document.getElementById('ficha');
+  const kv = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
+  dlg.querySelector('.fbody').innerHTML = `
+    <div class="fhead"><div><h2>${esc(b.tk)} <span class="tag">${esc(groupTitle(b.group))}</span></h2><div class="sub">${esc(b.name)} · ${esc(b.issuer)}</div></div>
+      <button type="button" class="x" aria-label="Cerrar" onclick="this.closest('dialog').close()">✕</button></div>
+    ${b.ok === false ? `<p class="warn">⚠ ${esc(b.notes || 'Condiciones incompletas o supuestas')}</p>` : ''}
+    <dl class="kv">
+      ${kv('Precio', `${cur} ${nf(r.price)}`)}${kv('Valor técnico', nf(r.vt))}${kv('Paridad', pct(r.parity, 1))}
+      ${kv(SECTIONS.find(s => s.g === b.group)?.tir || 'TIR', `<b>${pct(r.tir)}</b>`)}${kv('Duration mod.', nf(r.md))}${kv('Días al vto.', r.days ?? '—')}
+      ${kv('Tipo', esc((KIND[b.kind] || (() => b.kind))(b)))}${kv('Moneda', esc(b.curr || '—'))}${kv('Especie', esc(r.sym || '—'))}
+      ${kv('Emisión', fdate(b.issue))}${kv('Vencimiento', fdate(b.mat))}${kv('Base de cálculo', esc(b.dc || '—'))}
+    </dl>
+    ${r.flows ? `
+    <h3>Calculadora</h3>
+    <div class="calc">
+      <label>Monto a invertir (${cur}) <input type="number" id="cMonto" min="0" step="any" value="100000"></label>
+      <label>TIR objetivo (%) <input type="number" id="cTir" step="any" value="${r.tir != null ? +(r.tir * 100).toFixed(2) : ''}"></label>
+    </div>
+    <div id="cOut" class="calc-out"></div>
+    <h3>Flujo de fondos</h3>${projNote(r) ? `<p class="desc">${projNote(r)}</p>` : ''}
+    <div class="scroll"><table class="flows"><thead><tr><th class="l">Fecha</th><th>Renta</th><th>Amortización</th><th>Total c/100 VN</th><th>Cobrás</th></tr></thead><tbody id="cFlows"></tbody></table></div>`
+    : '<p class="desc">No hay flujo calculable para este instrumento (sin precio o con condiciones incompletas).</p>'}`;
+  if (!dlg.open) dlg.showModal();
+  if (r.flows) calcFicha();
+}
+function calcFicha() {
+  const r = FICHA; if (!r?.flows) return;
+  const cur = r.unit === 'ARS' ? '$' : 'US$';
+  const monto = +document.getElementById('cMonto').value || 0, y = parseFloat(document.getElementById('cTir').value);
+  const vn = r.price > 0 ? monto / r.price * 100 : 0, k = vn / 100;
+  const total = r.flows.reduce((s, f) => s + f.amt, 0) * k;
+  const px = isFinite(y) ? E.priceAtYield(r.flows, y / 100, LAST.settle) : null;
+  document.getElementById('cOut').innerHTML = `
+    <div><dt>Valor nominal que comprás</dt><dd>${nf(vn, 0)}</dd></div>
+    <div><dt>Total a cobrar</dt><dd>${cur} ${nf(total)}</dd></div>
+    <div><dt>Ganancia nominal</dt><dd class="${total >= monto ? 'up' : 'down'}">${cur} ${nf(total - monto)}</dd></div>
+    <div><dt>Precio para TIR ${isFinite(y) ? nf(y) + '%' : '—'}</dt><dd>${px == null ? '—' : `${cur} ${nf(px)} <span class="sub">(${(px / r.price - 1) >= 0 ? '+' : ''}${pct(px / r.price - 1)} vs hoy)</span>`}</dd></div>`;
+  document.getElementById('cFlows').innerHTML = r.flows.map(f => `<tr><td class="l">${fdate(f.date)}</td><td>${nf(f.interest, 4)}</td><td>${nf(f.amort, 4)}</td><td>${nf(f.amt, 4)}</td><td><b>${cur} ${nf(f.amt * k)}</b></td></tr>`).join('') +
+    `<tr class="tot"><td class="l">Total</td><td>${nf(r.flows.reduce((s, f) => s + f.interest, 0), 4)}</td><td>${nf(r.flows.reduce((s, f) => s + f.amort, 0), 4)}</td><td>${nf(total / (k || 1), 4)}</td><td><b>${cur} ${nf(total)}</b></td></tr>`;
+}
+document.getElementById('ficha').addEventListener('input', e => { if (['cMonto', 'cTir'].includes(e.target.id)) calcFicha(); });
+document.getElementById('ficha').addEventListener('click', e => { if (e.target.id === 'ficha') e.target.close(); }); // clic fuera del cuadro
+document.addEventListener('click', e => { const t = e.target.closest('[data-tk]'); if (t) openFicha(t.dataset.tk); });
+document.getElementById('csv').addEventListener('click', exportTable);
+document.getElementById('cal').addEventListener('change', e => { if (['calH', 'calG'].includes(e.target.id)) renderCalendar(LAST.rows); });
+document.getElementById('cal').addEventListener('click', e => {
+  if (e.target.id !== 'calCsv' || !LAST.cal) return;
+  downloadCSV(`pagos-${E.iso(new Date())}.csv`, ['Fecha','Bono','Tipo','Emisor','Moneda','Renta','Amortización','Total','Proyectado'],
+    LAST.cal.map(p => [p.date, p.tk, groupTitle(p.group), p.issuer, p.unit, p.interest, p.amort, p.amt, p.projected ? 'sí' : 'no']));
+});
 
 /* ---------- Filtros (se guardan por navegador y valen para todas las pestañas) ---------- */
 const F0 = { scope:'all', issuer:'', y0:'', y1:'', q:'', tir:false };

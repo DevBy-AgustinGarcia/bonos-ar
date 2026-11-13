@@ -107,10 +107,13 @@
     // Sin precio, sin condiciones completas o en euros (no hay cotización en EUR): sólo se muestra el precio.
     if (b.kind === 'none' || !(price > 0) || b.curr === 'EUR' || (b.kind === 'cap_fixed' && b.tem == null)) return res;
 
-    const zero = (VF, px) => { // bono a descuento: un pago VF al vencimiento
+    // Bono a descuento: un pago VF al vencimiento. scale pasa el flujo a la moneda del precio (coef. CER o dólar);
+    // principal es la parte del pago que se informa como amortización.
+    const zero = (VF, px, scale = 1, principal = 100) => {
       const k = irr([{ date: mat, amt: VF }], px, settle);
       return { ...k, tna: (VF / px - 1) * 365 / res.days, tem: Math.pow(VF / px, 30 / res.days) - 1, vf: VF,
-               next: { date: mat, amt: VF } };
+               next: { date: mat, amt: VF * scale },
+               flows: [{ date: mat, interest: (VF - principal) * scale, amort: principal * scale, amt: VF * scale }] };
     };
 
     switch (b.kind) {
@@ -124,7 +127,9 @@
         const coef = b.cer ? ctx.cerLag(settle) / ctx.cerLag(D(b.issue)) : 1;
         const pxReal = price / coef;
         const k = irr(fut, pxReal, settle);
-        return { ...res, ...k, coef, resid: cur.resid, vt: (cur.resid + accrued) * coef, rate: curPay.rate,
+        // Flujo en la moneda del precio: los CER se muestran ajustados por el coeficiente de hoy (sin inflación futura).
+        const flowsN = fut.map(f => ({ date: f.date, interest: f.interest * coef, amort: f.amort * coef, amt: f.amt * coef, resid: f.resid, rate: f.rate }));
+        return { ...res, ...k, coef, flows: flowsN, resid: cur.resid, vt: (cur.resid + accrued) * coef, rate: curPay.rate,
                  next: { date: fut[0].date, amt: fut[0].amt * coef }, tirKind: b.cer ? 'real' : (b.curr === 'ARS' ? 'TEA' : b.curr) };
       }
       case 'cap_fixed': {
@@ -134,11 +139,11 @@
       }
       case 'zero_cer': {
         const coef = ctx.cerLag(settle) / ctx.cerLag(D(b.issue));
-        const z = zero(100, price / coef);
+        const z = zero(100, price / coef, coef);
         return { ...res, ...z, tna: null, tem: null, coef, vt: 100 * coef, next: { date: mat, amt: 100 * ctx.cerLag(mat) / ctx.cerLag(D(b.issue)) }, tirKind: 'real' };
       }
       case 'zero_dl': {
-        const fx = ctx.a3500Now, z = zero(100, price / fx);
+        const fx = ctx.a3500Now, z = zero(100, price / fx, fx);
         return { ...res, ...z, tna: null, tem: null, vt: 100 * fx, fx, next: { date: mat, amt: 100 * fx }, tirKind: 'USD' };
       }
       case 'cap_tamar': case 'dual_fixed_tamar': {
@@ -173,7 +178,7 @@
         const tamarVF = tamarAcc * tamarFactor(ctx, settle, mat, b.spread, settle);
         const dlVF = 100 * fx;
         const VF = Math.max(tamarVF, dlVF);
-        return { ...res, ...zero(VF, price), vt: Math.max(tamarAcc, dlVF), leg: dlVF > tamarVF ? 'Dólar' : 'TAMAR', tirKind: 'TEA', projected: true };
+        return { ...res, ...zero(VF, price, 1, 100 * fx0), vt: Math.max(tamarAcc, dlVF), leg: dlVF > tamarVF ? 'Dólar' : 'TAMAR', tirKind: 'TEA', projected: true };
       }
     }
     return res;
@@ -192,6 +197,9 @@
     return { sym, q, price };
   }
 
-  const api = { value, makeContext, couponFlows, addBD, days360, D, iso, px, settlementDate, priceFor };
+  // Precio (por 100 VN, en la moneda del precio) que corresponde a una TIR efectiva anual y, sobre el flujo de value().
+  const priceAtYield = (flows, y, settle) => flows.reduce((s, f) => s + f.amt / Math.pow(1 + y, days(settle, f.date) / 365), 0);
+
+  const api = { value, priceAtYield, makeContext, couponFlows, addBD, days360, D, iso, px, settlementDate, priceFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.BondEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

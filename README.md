@@ -15,7 +15,7 @@ Abrir http://localhost:8020. No necesita instalar nada (sólo Python 3).
 - `update.py`: baja cotizaciones (data912) e índices del BCRA (CER, TAMAR, BADLAR, A3500) y la curva del Tesoro de EE.UU. a `data/`. El BCRA no permite pedidos desde el navegador, por eso se guardan como archivo.
 - `analysis.js`: pestaña Análisis: inflación, devaluación y TAMAR implícitas, spread ley AR/NY y riesgo país estimado.
 - `snapshot.js`: guarda una foto de precio y TIR de cada bono en `data/history/AAAA-MM.csv`.
-- `server.py`: servidor local que corre `update.py` cada 15 minutos.
+- `server.py`: servidor local que corre `update.py` cada 15 minutos (datos en `.local/data/`).
 - `.github/workflows/actualizar.yml`: en GitHub corre lo mismo cada 15 min en horario de mercado y publica en Pages.
 - `engine.js`: cálculo de flujos, valor técnico y TIR por tipo de instrumento.
 - `catalog.json`: condiciones de emisión de cada instrumento, armadas a partir de las fichas técnicas de BYMA. Los que tienen `"ok": false` tienen algún dato supuesto (ver `notes`).
@@ -31,4 +31,4 @@ Abrir http://localhost:8020. No necesita instalar nada (sólo Python 3).
 
 ## Trabajar en local
 
-`server.py` reescribe `data/`, que también actualiza la tarea programada de GitHub. Antes de `git pull`, descartá los datos locales con `git checkout -- data` (y borrá archivos nuevos de `data/` que no estén en el repo).
+`server.py` guarda sus datos en `.local/data/` (ignorado por git) y los sirve en lugar de `data/`, así no chocan con los que sube la tarea programada de GitHub.

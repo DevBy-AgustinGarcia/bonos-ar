@@ -5,107 +5,142 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Panel de Bonos AR</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap">
 <style>
-/* Layout: barra de estado, indicadores de mercado, pestañas por tipo de bono, curva y tabla de la pestaña activa. */
+/* Dirección: papel moneda. Azul de grabado sobre papel frío, el oro del sol de mayo para las provincias.
+   Una sola familia (Archivo) y su eje de ancho como voz: expandida para títulos, condensada para encabezados de tabla.
+   El protagonista es la curva de cada sección; todo lo demás queda callado. */
 :root{
-  --bg:#f5f6f4; --surface:#ffffff; --fg:#17201b; --muted:#5d6a62; --line:#dde2de;
-  --accent:#1f6f54; --s1:#1f6f54; --s2:#b45309; --up:#18794e; --down:#b4232c; --warn:#a16207;
-  --sans:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
+  --bg:#edf1f4; --surface:#fbfcfd; --band:#e1e9f1; --fg:#14202e; --muted:#56657a; --line:#d3dbe3;
+  --accent:#1f5fa8; --s1:#1f5fa8; --s2:#b7791f; --up:#1e7a4c; --down:#b3261e; --warn:#94650a;
+  --sans:"Archivo",system-ui,sans-serif; --mono:"Archivo",system-ui,sans-serif;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root{
-  --bg:#111513; --surface:#181d1a; --fg:#e4ebe6; --muted:#93a198; --line:#2a322d;
-  --accent:#4cc39a; --s1:#4cc39a; --s2:#f0a35c; --up:#4cc38a; --down:#f07178; --warn:#e3b341;
+  --bg:#0e1826; --surface:#132133; --band:#112538; --fg:#e4ecf4; --muted:#93a3b8; --line:#24364c;
+  --accent:#79b4f0; --s1:#79b4f0; --s2:#e3b04b; --up:#5cc48c; --down:#f2817a; --warn:#e3b341;
   color-scheme:dark;
 }}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--sans)}
-.wrap{max-width:1320px;margin:0 auto;padding:20px 16px 40px;display:grid;gap:16px}
-header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
-h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 var(--sans);font-variant-numeric:tabular-nums;font-stretch:100%}
+.wrap{max-width:1320px;margin:0 auto;padding:28px 16px 48px;display:grid;gap:18px}
+.wrap>*,header>*{min-width:0}
+@media (prefers-reduced-motion:no-preference){dialog#ficha[open]{animation:rise .18s ease-out}@keyframes rise{from{opacity:0;transform:translateY(8px)}}}
+
+/* Encabezado */
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 24px}
+h1{margin:0;font-size:clamp(30px,5vw,46px);line-height:1;font-weight:800;font-stretch:125%;letter-spacing:-.02em}
 .sub{color:var(--muted);font-size:13px}
-.status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+header .sub{font-size:15px;margin-top:8px;max-width:60ch}
+.status{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
 .dot.ok{background:var(--up)} .dot.err{background:var(--down)} .dot.load{background:var(--warn)}
-button,select{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
+button,select{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:5px 11px;cursor:pointer}
 button:hover,select:hover{border-color:var(--accent)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 label.chk{display:flex;gap:6px;align-items:center;cursor:pointer}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
-.kpi{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 12px}
-.kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
-.kpi .v{font:500 18px var(--mono);font-variant-numeric:tabular-nums}
-.tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
-.tabs a{padding:8px 14px;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500}
+
+/* Indicadores: una tira continua tipo pizarra, no tarjetas */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border-top:2px solid var(--fg);border-bottom:1px solid var(--line)}
+.kpi{padding:10px 14px 12px;border-left:1px solid var(--line)}
+.kpi:first-child{border-left:0;padding-left:0}
+.kpi .l{font-size:12px;color:var(--muted);font-stretch:87%}
+.kpi .v{font-size:22px;font-weight:650;font-stretch:112%;letter-spacing:-.01em;white-space:nowrap}
+@media (max-width:640px){.kpis{grid-template-columns:1fr 1fr}.kpi{border-left:0;padding-left:0;border-top:1px solid var(--line)}.kpi:nth-child(-n+2){border-top:0}}
+
+/* Pestañas: dos grupos, bonos por tipo y herramientas */
+.tabs{display:flex;gap:2px 18px;align-items:flex-end;overflow-x:auto;scrollbar-width:thin;border-bottom:1px solid var(--line)}
+.tg{display:flex;gap:2px;flex:none}
+.tg + .tg{padding-left:18px;border-left:1px solid var(--line)}
+.tabs a{padding:9px 10px 8px;color:var(--muted);text-decoration:none;border-bottom:3px solid transparent;margin-bottom:-1px;font-weight:550;white-space:nowrap}
 .tabs a:hover{color:var(--fg)}
 .tabs a.on{color:var(--fg);border-color:var(--accent)}
-.tabs a span{font:400 11px var(--mono);color:var(--muted);margin-left:4px}
-.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px;min-width:0}
-.panel h2{margin:0;font-size:14px;font-weight:600}
-.phead{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px}
-.desc{color:var(--muted);font-size:13px;max-width:90ch;margin:0 0 4px}
-.legend{display:flex;gap:14px;font-size:12px;color:var(--muted)}
-.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.tabs a span{font-size:12px;font-weight:400;color:var(--muted);margin-left:5px}
+
+/* Paneles */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;min-width:0}
+.panel h2{margin:0;font-size:17px;font-weight:700;font-stretch:112%;letter-spacing:-.01em}
+.phead{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px 16px;margin-bottom:6px}
+.desc{color:var(--muted);font-size:13.5px;max-width:78ch;margin:0 0 6px}
+.legend{display:flex;gap:16px;font-size:13px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+
+/* La curva: la pieza protagonista */
+.hero{background:var(--band);border:0;border-radius:14px;padding:22px 22px 14px}
+.hero h2{font-size:clamp(20px,3vw,28px);font-weight:750;font-stretch:118%;line-height:1.15}
+.hero .desc{font-size:14px}
+@media (max-width:640px){.hero,.panel{padding:14px}.fbody{padding:16px}}
 .scroll{overflow-x:auto}
 #chart svg{min-width:640px;display:block}
-svg text{font-family:var(--mono);font-size:11px;fill:var(--muted)}
-table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;min-width:980px}
-th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
-th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:500;cursor:pointer;user-select:none;position:sticky;top:0;background:var(--surface)}
-th.sorted{color:var(--fg)}
+svg text{font-family:var(--sans);font-size:11.5px;fill:var(--muted)}
+
+/* Tablas */
+table{border-collapse:collapse;width:100%;min-width:980px}
+th,td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:12.5px;font-weight:600;font-stretch:82%;color:var(--muted);cursor:pointer;user-select:none;position:sticky;top:0;background:var(--surface);border-bottom:2px solid var(--line)}
+th.sorted{color:var(--fg);border-bottom-color:var(--accent)}
 th.l,td.l{text-align:left}
-td{font-family:var(--mono);font-size:13px}
-td.tk{font-family:var(--sans);font-weight:600}
-td.nm{font-family:var(--sans);color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis}
-td.tir{font-weight:500}
+td{font-size:13.5px}
+tbody tr:hover td{background:color-mix(in srgb,var(--band) 60%,transparent)}
+td.tk{font-weight:700}
+td.nm{color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;font-stretch:92%}
+td.tir{font-weight:650}
 tr.dim td{opacity:.55}
 .up{color:var(--up)} .down{color:var(--down)}
-.tag{font:500 11px var(--sans);padding:1px 6px;border-radius:4px;border:1px solid currentColor;color:var(--muted)}
+.tag{font-size:12px;font-weight:550;padding:1px 7px;border-radius:20px;background:var(--band);color:var(--muted)}
 .warn{color:var(--warn);cursor:help}
-.notes{color:var(--muted);font-size:12px;max-width:95ch;display:grid;gap:4px}
+.notes{color:var(--muted);font-size:12.5px;max-width:95ch;display:grid;gap:6px;border-top:1px solid var(--line);padding-top:14px}
+
+/* Filtros */
 .filters{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;font-size:13px;color:var(--muted)}
 .filters label{display:flex;gap:6px;align-items:center}
-.filters input[type=search]{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:5px 10px;width:190px}
-.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.filters input[type=search]{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:5px 11px;width:200px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
 .seg button{border:0;border-radius:0;border-right:1px solid var(--line)}
 .seg button:last-child{border-right:0}
-.seg button.on{background:var(--accent);color:var(--bg)}
-.an{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr))}
-.an .panel table{min-width:0}
-.an .big{font:500 20px var(--mono);color:var(--fg)}
+.seg button.on{background:var(--accent);color:var(--surface)}
+
+/* Análisis, escenarios, comparar, calendario */
+.an{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr))}
+.an .panel table,.an1 .panel table{min-width:0}
+.an1{display:grid;gap:18px}
+.an .big{font-size:22px;font-weight:700;font-stretch:112%;color:var(--fg)}
+.mono{font-variant-numeric:tabular-nums}
 [hidden]{display:none!important}
-.lnk{font:inherit;font-weight:600;color:var(--fg);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}
+.lnk{font:inherit;font-weight:700;color:var(--fg);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px;text-decoration-thickness:2px}
 .lnk:hover{color:var(--accent);text-decoration-color:var(--accent)}
-h3.month{font-size:13px;font-weight:600;margin:16px 0 4px;text-transform:capitalize}
-h3.month span{font:400 12px var(--mono);color:var(--muted);text-transform:none;margin-left:6px}
+h3.month{font-size:16px;font-weight:700;font-stretch:112%;margin:20px 0 4px}
+h3.month::first-letter{text-transform:uppercase}
+h3.month span{font-size:13px;font-weight:400;font-stretch:100%;color:var(--muted);margin-left:8px}
 table.cal,table.flows{min-width:560px}
-dialog#ficha{width:min(820px,calc(100vw - 32px));max-height:calc(100vh - 32px);border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--fg);padding:0}
-dialog#ficha::backdrop{background:rgba(0,0,0,.45)}
-.fbody{padding:18px;display:grid;gap:12px}
-.fhead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
-.fhead h2{margin:0;font-size:20px}
-.fbody h3{margin:6px 0 0;font-size:14px}
-.x{border:0;font-size:16px;padding:4px 8px}
-.kv,.calc-out{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 16px;margin:0}
-.kv dt,.calc-out dt{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
-.kv dd,.calc-out dd{margin:0;font:500 14px var(--mono)}
-.calc{display:flex;flex-wrap:wrap;gap:12px}
-.calc label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
-.calc input{font:500 14px var(--mono);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;width:200px}
-tr.tot td{font-weight:600;border-top:2px solid var(--line)}
-.an1{display:grid;gap:16px}
-.an1 .panel table{min-width:0}
-.mono{font-family:var(--mono)}
-.bars{display:grid;gap:6px;margin:10px 0 14px}
-.bar{display:grid;grid-template-columns:minmax(120px,280px) 1fr 70px;gap:10px;align-items:center;font-size:13px}
+.bars{display:grid;gap:7px;margin:12px 0 16px}
+.bar{display:grid;grid-template-columns:minmax(120px,300px) 1fr 70px;gap:12px;align-items:center;font-size:13.5px}
 .bar .bl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bar .bt{height:12px;background:var(--bg);border-radius:3px;overflow:hidden}
-.bar .bt i{display:block;height:100%;border-radius:3px}
+.bar .bt{height:14px;background:var(--band);border-radius:4px;overflow:hidden}
+.bar .bt i{display:block;height:100%;border-radius:4px}
 .bar b{text-align:right}
+@media (max-width:560px){.bar{grid-template-columns:1fr 64px}.bar .bt{grid-column:1/-1;order:3}}
 td.wrap{white-space:normal;min-width:160px;max-width:300px}
-details{margin-top:12px}
-summary{cursor:pointer;font-weight:500}
+details{margin-top:14px}
+summary{cursor:pointer;font-weight:600}
+
+/* Ficha */
+dialog#ficha{width:min(840px,calc(100vw - 24px));max-height:calc(100vh - 24px);border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--fg);padding:0}
+dialog#ficha::backdrop{background:rgba(14,24,38,.5)}
+.fbody{padding:20px 22px;display:grid;gap:14px}
+.fhead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-bottom:2px solid var(--fg);padding-bottom:12px}
+.fhead h2{margin:0;font-size:30px;font-weight:800;font-stretch:125%;line-height:1;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.fhead .sub{margin-top:6px;font-size:14px}
+.fbody h3{margin:8px 0 0;font-size:16px;font-weight:700;font-stretch:112%}
+.x{border:0;font-size:18px;padding:4px 8px;background:none}
+.kv,.calc-out{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px 18px;margin:0}
+.kv dt,.calc-out dt{font-size:12px;color:var(--muted);font-stretch:87%}
+.kv dd,.calc-out dd{margin:0;font-size:15px;font-weight:600}
+.calc{display:flex;flex-wrap:wrap;gap:14px}
+.calc label{display:grid;gap:4px;font-size:12.5px;color:var(--muted)}
+.calc input{font:600 15px var(--sans);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:7px 11px;width:200px}
+tr.tot td{font-weight:700;border-top:2px solid var(--fg)}
 .err-box{color:var(--down);font-size:13px;margin-top:8px}
 </style>
 </head>
@@ -114,7 +149,7 @@ summary{cursor:pointer;font-weight:500}
   <header>
     <div>
       <h1>Bonos argentinos</h1>
-      <div class="sub">Precio, valor técnico, paridad y TIR de todo lo que cotiza en BYMA, por tipo de ajuste</div>
+      <div class="sub">Precio, valor técnico, paridad y TIR de cada bono y letra que cotiza en BYMA, ordenados por cómo ajustan.</div>
     </div>
     <div class="status">
       <span><span id="dot" class="dot load"></span> <span id="stat">Cargando…</span></span>
@@ -141,7 +176,7 @@ summary{cursor:pointer;font-weight:500}
     <button type="button" id="csv">Exportar CSV</button>
   </section>
 
-  <section class="panel bv">
+  <section class="panel bv hero">
     <div class="phead"><h2 id="ptitle"></h2><div class="legend"><span><i style="background:var(--s1)"></i>Nación / BCRA</span><span><i style="background:var(--s2)"></i>Provincias y municipios</span></div></div>
     <p class="desc" id="pdesc"></p>
     <div id="chart" class="scroll"></div>
@@ -280,8 +315,9 @@ function render(stale) {
   ].map(([l,v]) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
 
   // Pestañas con cantidad de instrumentos
-  document.getElementById('tabs').innerHTML = SECTIONS.map(s =>
-    `<a href="#${s.id}" class="${s.id===tab?'on':''}">${s.title}${s.g ? `<span>${rows.filter(r => r.b.group === s.g).length}</span>` : ''}</a>`).join('');
+  const tabLink = s => `<a href="#${s.id}" class="${s.id===tab?'on':''}"${s.id===tab?' aria-current="page"':''}>${s.title}${s.g ? `<span>${rows.filter(r => r.b.group === s.g).length}</span>` : ''}</a>`;
+  document.getElementById('tabs').innerHTML = `<div class="tg" aria-label="Bonos por tipo">${SECTIONS.filter(s => s.g).map(tabLink).join('')}</div>` +
+    `<div class="tg" aria-label="Herramientas">${SECTIONS.filter(s => !s.g).map(tabLink).join('')}</div>`;
 
   const sec = SECTIONS.find(s => s.id === tab);
   const view = sec.view || 'bv';
@@ -296,7 +332,7 @@ function render(stale) {
   if (view === 'cal') return renderCalendar(rows);
   if (view === 'esc') return renderScenarios(rows, ctx, settle);
   if (view === 'cmp') return renderCompare(rows, ctx, settle);
-  document.getElementById('ptitle').textContent = sec.title + ': ' + sec.tir + ' vs duration modificada';
+  document.getElementById('ptitle').textContent = `${sec.title}: ${sec.tir} según la duration`;
   document.getElementById('pdesc').textContent = sec.desc;
   const onlyVol = document.getElementById('onlyVol').checked;
   const inSec = rows.filter(r => r.b.group === sec.g);
@@ -323,7 +359,7 @@ function render(stale) {
 function drawChart(pts) {
   const el = document.getElementById('chart');
   if (pts.length < 2) { el.innerHTML = '<p class="desc">No hay suficientes bonos con TIR para dibujar la curva.</p>'; return; }
-  const W = 1200, H = 300, m = {l:52,r:24,t:14,b:34};
+  const W = 1200, H = 340, m = {l:52,r:24,t:14,b:34};
   const xs = pts.map(p=>p.md), ys = pts.map(p=>p.tir*100);
   const x1 = Math.max(...xs) * 1.05;
   // Recorta el eje Y a percentiles para que un outlier (bono sin liquidez) no aplaste la curva

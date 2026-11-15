@@ -121,6 +121,60 @@
     }).sort((a, b) => a.md - b.md);
   }
 
-  const api = { yieldOf, rateShock, cerScenario, interp, fixedCurve, inflation, devaluation, tamarBreakeven, lawSpread, countryRisk };
+  /* ---------- Comparar inversiones en pesos a un plazo ---------- */
+  const median = a => { const s = [...a].sort((x, y) => x - y), n = s.length; return n ? (n % 2 ? s[n >> 1] : (s[n / 2 - 1] + s[n / 2]) / 2) : null; };
+  // TEA de un plazo fijo que se renueva cada p días a la misma TNA.
+  const pfTea = (tna, p) => Math.pow(1 + tna * p / 365, 365 / p) - 1;
+  // Tasa de un banco para un plazo: la del plazo publicado más largo que no lo supere; si no hay, la de 30 días.
+  function bankRate(b, days) {
+    const opts = b.tasas.filter(([p]) => p <= days).sort((x, y) => y[0] - x[0]);
+    const [p, tna] = opts.length ? opts[0] : [30, b.tna30];
+    return { p, tna, tea: pfTea(tna, p) };
+  }
+  // opts: { rows, tasas, idx, days, cer (filas de cerScenario) }. Devuelve una fila por alternativa con TNA y TEA.
+  function compare({ rows, tasas, idx, days, cer }) {
+    const out = [], last = a => a?.length ? a[a.length - 1][1] : null;
+    // Lecaps/Boncaps: TEA interpolada por días al vencimiento y la letra más cercana al plazo.
+    const lec = rows.filter(r => r.b.kind === 'cap_fixed' && r.tir != null && r.days > 0 && r.tir > 0 && r.tir < 3).sort((a, b) => a.days - b.days);
+    if (lec.length) {
+      const near = lec.reduce((m, r) => Math.abs(r.days - days) < Math.abs(m.days - days) ? r : m);
+      const tea = interp(lec.map(r => [r.days, r.tir]), days) ?? lec[lec.length - 1].tir;
+      out.push({ id: 'lecap', name: 'Lecap / Boncap', detail: `Curva a ${days} días; la más cercana es ${near.tk} (${near.days} días, ${(near.tir * 100).toFixed(2)}% TEA)`, tea, tk: near.tk,
+                 liq: 'Se vende en el día (T+1)', risk: 'Tesoro nacional; el precio fluctúa si la vendés antes' });
+    }
+    if (tasas?.plazoFijo?.length) {
+      const all = tasas.plazoFijo.map(b => ({ ...b, ...bankRate(b, days) }));
+      const bna = all.find(b => /Nacion Argentina/i.test(b.entidad));
+      const best = all.reduce((m, b) => b.tea > m.tea ? b : m);
+      if (bna) out.push({ id: 'pf-bna', name: 'Plazo fijo Banco Nación', detail: `TNA ${(bna.tna * 100).toFixed(2)}% a ${bna.p} días${bna.p < days ? ', renovado' : ''}`, tna: bna.tna, tea: bna.tea,
+                          liq: `Inmovilizado ${bna.p} días`, risk: 'Garantía de depósitos hasta el tope' });
+      out.push({ id: 'pf-med', name: 'Plazo fijo (mediana de bancos)', detail: `${all.length} bancos y billeteras`, tea: median(all.map(b => b.tea)), tna: median(all.map(b => b.tna)),
+                 liq: 'Inmovilizado hasta el vencimiento', risk: 'Garantía de depósitos hasta el tope' });
+      out.push({ id: 'pf-best', name: `Plazo fijo mejor tasa: ${best.entidad}`, detail: `TNA ${(best.tna * 100).toFixed(2)}% a ${best.p} días${best.p < days ? ', renovado' : ''}`, tna: best.tna, tea: best.tea,
+                 liq: `Inmovilizado ${best.p} días`, risk: 'Entidad chica: revisá la garantía de depósitos' });
+    }
+    if (tasas?.mm?.length) {
+      const big = tasas.mm.filter(f => f.tea > 0 && f.tea < 1);
+      const top = big.reduce((m, f) => f.tea > m.tea ? f : m);
+      const d = big[0]?.dias;
+      out.push({ id: 'mm-med', name: 'Fondo money market (mediana)', detail: `${big.length} fondos grandes en pesos, rendimiento de los últimos ${d} día${d === 1 ? '' : 's'}`, tea: median(big.map(f => f.tea)), tna: median(big.map(f => f.tna)),
+                 liq: 'Rescate en el día', risk: 'Tasa variable: cambia todos los días' });
+      // Con menos de 5 días de historia el "mejor" fondo suele ser ruido (fin de semana, un día atípico): no se muestra.
+      if (d >= 5) out.push({ id: 'mm-best', name: `Money market mejor: ${top.fondo}`, detail: `Últimos ${top.dias} día${top.dias === 1 ? '' : 's'}`, tea: top.tea, tna: top.tna,
+                 liq: 'Rescate en el día', risk: 'Tasa variable: cambia todos los días' });
+    }
+    const pases = last(idx?.pases1d);
+    if (pases != null) out.push({ id: 'caucion', name: 'Caución a 1 día (referencia)', detail: `Tasa de pases entre terceros del BCRA, ${pases.toFixed(2)}% TNA, renovada todos los días`, tna: pases / 100,
+                                  tea: Math.pow(1 + pases / 100 / 365, 365) - 1, liq: 'Se renueva cada día', risk: 'Garantizada por el mercado; tasa variable' });
+    if (cer?.length) {
+      const pts = cer.filter(r => r.tirNom != null).map(r => [r.md * 365, r.tirNom]);
+      const tea = pts.length ? interp(pts, days) : null;
+      if (tea != null) out.push({ id: 'cer', name: 'Bonos CER (con la inflación supuesta)', detail: 'Curva CER en pesos a ese plazo, con la inflación de la pestaña Escenarios', tea,
+                                  liq: 'Se vende en el día (T+1)', risk: 'Depende de la inflación real' });
+    }
+    return out.filter(o => o.tea != null && isFinite(o.tea)).sort((a, b) => b.tea - a.tea);
+  }
+
+  const api = { compare, bankRate, yieldOf, rateShock, cerScenario, interp, fixedCurve, inflation, devaluation, tamarBreakeven, lawSpread, countryRisk };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.BondAnalysis = api;
 })(typeof window !== 'undefined' ? window : globalThis);

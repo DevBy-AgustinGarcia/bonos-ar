@@ -97,6 +97,15 @@ tr.tot td{font-weight:600;border-top:2px solid var(--line)}
 .an1{display:grid;gap:16px}
 .an1 .panel table{min-width:0}
 .mono{font-family:var(--mono)}
+.bars{display:grid;gap:6px;margin:10px 0 14px}
+.bar{display:grid;grid-template-columns:minmax(120px,280px) 1fr 70px;gap:10px;align-items:center;font-size:13px}
+.bar .bl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .bt{height:12px;background:var(--bg);border-radius:3px;overflow:hidden}
+.bar .bt i{display:block;height:100%;border-radius:3px}
+.bar b{text-align:right}
+td.wrap{white-space:normal;min-width:160px;max-width:300px}
+details{margin-top:12px}
+summary{cursor:pointer;font-weight:500}
 .err-box{color:var(--down);font-size:13px;margin-top:8px}
 </style>
 </head>
@@ -146,6 +155,7 @@ tr.tot td{font-weight:600;border-top:2px solid var(--line)}
   <div id="an" class="an" hidden></div>
   <div id="cal" hidden></div>
   <div id="esc" class="an1" hidden></div>
+  <div id="cmp" class="an1" hidden></div>
   <dialog id="ficha" aria-label="Ficha del bono"><div class="fbody"></div></dialog>
 
   <section class="notes">
@@ -169,10 +179,11 @@ const SECTIONS = [
   { id:'otros',  g:'OTROS',  title:'Otros',               tir:'TIR',           desc:'BADLAR, cupones PBI y otros instrumentos.' },
   { id:'analisis', title:'Análisis', view:'an' },
   { id:'escenarios', title:'Escenarios', view:'esc' },
+  { id:'comparar', title:'Comparar', view:'cmp' },
   { id:'calendario', title:'Calendario', view:'cal' },
 ];
 let LAST = {}; // última vista calculada: filas, contexto y tabla visible (para CSV, ficha y calendario)
-let CAT = [], quotes = null, idx = null, ust = null, lastOk = null, sortKey = 'md', sortDir = 1;
+let CAT = [], quotes = null, idx = null, ust = null, tasas = null, lastOk = null, sortKey = 'md', sortDir = 1;
 let tab = (location.hash || '').slice(1);
 try { if (!SECTIONS.some(s => s.id === tab)) tab = localStorage.getItem('tab') || 'hd'; } catch { tab = tab || 'hd'; }
 
@@ -195,9 +206,9 @@ async function load() {
   setStatus('load', 'Actualizando…');
   try {
     if (location.protocol === 'file:') throw new Error('abrí el panel desde un servidor (python server.py y http://localhost:8020)');
-    const [c, q, i, u] = await Promise.all([CAT.length ? CAT : getJSON('catalog.json'), getQuotes(), getJSON('data/indices.json'),
-                                            getJSON('data/ust.json').catch(() => null)]);
-    CAT = c; ust = u; quotes = Object.fromEntries(q.map(x => [x.symbol, x])); idx = i; lastOk = new Date();
+    const [c, q, i, u, t] = await Promise.all([CAT.length ? CAT : getJSON('catalog.json'), getQuotes(), getJSON('data/indices.json'),
+                                            getJSON('data/ust.json').catch(() => null), getJSON('data/tasas.json').catch(() => null)]);
+    CAT = c; ust = u; tasas = t; quotes = Object.fromEntries(q.map(x => [x.symbol, x])); idx = i; lastOk = new Date();
     document.getElementById('err').textContent = '';
     render();
   } catch (e) {
@@ -279,10 +290,12 @@ function render(stale) {
   document.getElementById('an').hidden = view !== 'an';
   document.getElementById('cal').hidden = view !== 'cal';
   document.getElementById('esc').hidden = view !== 'esc';
+  document.getElementById('cmp').hidden = view !== 'cmp';
   document.getElementById('espWrap').hidden = !(sec.g === 'HD' || view !== 'bv');
   if (view === 'an') return renderAnalysis(rows, ctx);
   if (view === 'cal') return renderCalendar(rows);
   if (view === 'esc') return renderScenarios(rows, ctx, settle);
+  if (view === 'cmp') return renderCompare(rows, ctx, settle);
   document.getElementById('ptitle').textContent = sec.title + ': ' + sec.tir + ' vs duration modificada';
   document.getElementById('pdesc').textContent = sec.desc;
   const onlyVol = document.getElementById('onlyVol').checked;
@@ -589,6 +602,42 @@ function sensTable(r) {
   return `<h3>Si cambia la TIR</h3>${tbl([['Movimiento', x => x.b === 0 ? 'hoy' : (x.b > 0 ? '+' : '') + x.b + ' pb', 'l'], ['TIR', x => pct(x.tir)], ['Precio', x => nf(x.p)],
     ['Variación', x => x.b === 0 ? '—' : `<span class="${x.chg >= 0 ? 'up' : 'down'}">${x.chg >= 0 ? '+' : ''}${pct(x.chg)}</span>`]], rows)}`;
 }
+
+/* ---------- Pestaña Comparar ---------- */
+const CMP = { monto: 1000000, days: 90 };
+function renderCompare(rows, ctx, settle) {
+  const el = document.getElementById('cmp');
+  const rem = remInfo(), piM = ESC.pi ?? rem?.monthly ?? 2;
+  const cer = A.cerScenario(rows, A.fixedCurve(rows), idx.cer, settle, piM / 100, E);
+  const list = A.compare({ rows, tasas, idx, days: CMP.days, cer });
+  const fin = o => CMP.monto * Math.pow(1 + o.tea, CMP.days / 365);
+  const maxT = Math.max(...list.map(o => o.tea), 0.01);
+  const bars = list.map(o => `<div class="bar"><span class="bl">${esc(o.name)}</span><span class="bt"><i style="width:${(o.tea / maxT * 100).toFixed(1)}%;background:${o.id === 'lecap' ? 'var(--accent)' : 'var(--s2)'}"></i></span><b class="mono">${pct(o.tea)}</b></div>`).join('');
+  const banks = (tasas?.plazoFijo || []).map(b => ({ ...b, ...A.bankRate(b, CMP.days) })).sort((a, b) => b.tea - a.tea);
+  const funds = [...(tasas?.mm || [])].sort((a, b) => b.tea - a.tea);
+  el.innerHTML = `<section class="panel">
+    <div class="phead"><h2>Comparar inversiones en pesos</h2>
+      <div class="filters">
+        <label>Monto ($) <input type="number" id="cmpM" min="0" step="any" value="${CMP.monto}" style="width:140px"></label>
+        <label>Plazo <select id="cmpD">${[30, 60, 90, 180, 270, 365].map(d => `<option value="${d}"${d === CMP.days ? ' selected' : ''}>${d} días</option>`).join('')}</select></label>
+      </div></div>
+    <p class="desc">Cuánto rinde cada alternativa al mismo plazo, todo pasado a tasa efectiva anual (TEA) para poder compararlo. Las tasas variables (money market, caución, plazo fijo renovado) suponen que la tasa de hoy se mantiene. No incluye impuestos ni comisiones.</p>
+    <div class="bars">${bars}</div>
+    ${tbl([['Alternativa', o => `<b>${esc(o.name)}</b><div class="sub">${esc(o.detail)}</div>`, 'l wrap'], ['TNA', o => pct(o.tna)], ['TEA', o => `<b>${pct(o.tea)}</b>`],
+           [`Tenés a ${CMP.days} días`, o => '$ ' + nf(fin(o), 0)], ['Ganancia', o => '$ ' + nf(fin(o) - CMP.monto, 0)], ['Liquidez', o => esc(o.liq), 'l wrap'], ['Riesgo', o => esc(o.risk), 'l wrap']], list)}
+    <details><summary>Plazo fijo: todos los bancos (${banks.length})</summary>
+      ${tbl([['Entidad', b => esc(b.entidad), 'l'], ['Plazo usado', b => b.p + ' días'], ['TNA', b => pct(b.tna)], ['TEA', b => `<b>${pct(b.tea)}</b>`]], banks)}</details>
+    <details><summary>Fondos money market (${funds.length} más grandes)</summary>
+      ${tbl([['Fondo', f => esc(f.fondo), 'l'], ['Patrimonio', f => '$ ' + nf(f.patrimonio / 1e9, 0) + ' mil M'], ['Período', f => `${fdate(f.desde)} → ${fdate(f.hasta)}`], ['TNA', f => pct(f.tna)], ['TEA', f => `<b>${pct(f.tea)}</b>`]], funds)}</details>
+    <p class="desc">Fuentes: Lecaps de data912; plazo fijo y fondos de ArgentinaDatos (BCRA y CAFCI); caución aproximada con la tasa de pases a 1 día entre terceros del BCRA. El rendimiento de los fondos se mide sobre los últimos días disponibles y se va estabilizando a medida que se acumula una semana de datos.</p>
+  </section>`;
+}
+document.getElementById('cmp').addEventListener('change', e => {
+  if (e.target.id === 'cmpM') CMP.monto = +e.target.value || 0;
+  else if (e.target.id === 'cmpD') CMP.days = +e.target.value;
+  else return;
+  renderCompare(LAST.rows, LAST.ctx, LAST.settle);
+});
 
 /* ---------- Filtros (se guardan por navegador y valen para todas las pestañas) ---------- */
 const F0 = { scope:'all', issuer:'', y0:'', y1:'', q:'', tir:false };

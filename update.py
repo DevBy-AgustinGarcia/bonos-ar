@@ -2,8 +2,10 @@
 
 - data/quotes.json : cotizaciones de data912 (bonos + letras). La página las pide en vivo
                      directo a data912; este archivo es el respaldo si esa llamada falla.
-- data/indices.json: CER, TAMAR, BADLAR y A3500 de la API del BCRA, que no permite pedidos
-                     desde el navegador. Se renueva si tiene más de INDICES_TTL horas.
+- data/indices.json: CER, TAMAR, BADLAR, A3500, inflación, REM y tasas de referencia de la API
+                     del BCRA, que no permite pedidos desde el navegador. Se renueva cada INDICES_TTL horas.
+- data/ust.json    : curva del Tesoro de EE.UU. (riesgo país estimado).
+- data/tasas.json  : plazo fijo por banco y rendimiento de fondos money market (ArgentinaDatos).
 
 Lo corre la tarea programada de GitHub (cada 15 min en horario de mercado) y también server.py.
 Uso:  python update.py  [--force]
@@ -20,7 +22,9 @@ BCRA = "https://api.bcra.gob.ar/estadisticas/v4.0/monetarias/{id}?desde={desde}&
 # id de variable BCRA -> (clave, desde cuándo hace falta la serie)
 SERIES = {30: ("cer", "2003-01-01"), 44: ("tamar", "2024-06-01"), 7: ("badlar", "2024-06-01"), 5: ("a3500", "2024-06-01"),
           27: ("inflacion", "2024-01-01"),  # inflación mensual (INDEC), %
-          29: ("rem12", "2024-01-01")}      # REM: inflación esperada próximos 12 meses (mediana), %
+          29: ("rem12", "2024-01-01"),      # REM: inflación esperada próximos 12 meses (mediana), %
+          150: ("pases1d", "2025-01-01"),   # pases entre terceros a 1 día, TNA % (referencia de caución)
+          12: ("pf30", "2025-01-01")}       # plazo fijo a 30 días, promedio del sistema, TNA %
 INDICES_TTL = 6  # horas: el BCRA publica una vez por día
 
 
@@ -104,10 +108,57 @@ def update_ust(force=False):
     return f"{y}-{m}-{d}"
 
 
+AD = "https://api.argentinadatos.com/v1/finanzas"
+MM_FONDOS = 15     # fondos money market en pesos más grandes que se muestran
+MM_DIAS = 7        # rendimiento sobre los últimos ~7 días (con 1 día el dato es muy ruidoso)
+
+
+def update_rates(force=False):
+    """Plazo fijo por banco y fondos money market. Guarda el valor cuotaparte de cada día en el
+    propio archivo, porque la API sólo da los dos últimos días y hace falta una semana para medir."""
+    if not force and age_of("tasas.json") < INDICES_TTL * 3600:
+        return False
+    try:
+        prev = json.loads((DATA / "tasas.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        prev = {}
+    pf = [{"entidad": b["entidad"].title().replace(" S.A.", "").replace(" Sociedad Anonima", ""),
+           "tna30": b.get("tnaClientes") or 0,
+           "tasas": [[t["plazoMinDias"], t["tna"]] for t in (b.get("tasas") or []) if t.get("plazoMinDias") and t.get("tna")]}
+          for b in fetch_json(f"{AD}/tasas/plazoFijo") if b.get("tnaClientes")]
+    ult, pen = fetch_json(f"{AD}/fci/mercadoDinero/ultimo"), fetch_json(f"{AD}/fci/mercadoDinero/penultimo")
+    pesos = [f for f in ult if f.get("patrimonio") and f.get("vcp") and not any(k in f["fondo"] for k in ("lar", "USD", "U$S", "US$"))]
+    top = sorted(pesos, key=lambda f: -f["patrimonio"])[:MM_FONDOS]
+    hist = prev.get("mmHist", {})
+    pen_by = {f["fondo"]: f for f in pen if f.get("vcp")}
+    mm, new_hist = [], {}
+    for f in top:
+        h = {d: v for d, v in hist.get(f["fondo"], [])}
+        if f["fondo"] in pen_by:
+            h[pen_by[f["fondo"]]["fecha"]] = pen_by[f["fondo"]]["vcp"]
+        h[f["fecha"]] = f["vcp"]
+        pts = sorted(h.items())[-12:]
+        new_hist[f["fondo"]] = pts
+        last_d, last_v = pts[-1]
+        target = (date.fromisoformat(last_d) - timedelta(days=MM_DIAS)).isoformat()
+        base = [p for p in pts[:-1] if p[0] <= target] or pts[:-1]  # la más cercana a 7 días atrás, si no la primera
+        if not base:
+            continue
+        d0, v0 = base[-1] if base[-1][0] <= target else base[0]
+        days = (date.fromisoformat(last_d) - date.fromisoformat(d0)).days
+        if days <= 0 or v0 <= 0:
+            continue
+        r = last_v / v0 - 1
+        mm.append({"fondo": f["fondo"], "patrimonio": f["patrimonio"], "desde": d0, "hasta": last_d, "dias": days,
+                   "tna": r * 365 / days, "tea": (1 + r) ** (365 / days) - 1})
+    write("tasas.json", {"updated": int(time.time()), "plazoFijo": pf, "mm": mm, "mmHist": new_hist})
+    return f"{len(pf)} bancos, {len(mm)} fondos"
+
+
 def main(force=False):
     ok = True
     for name, fn in (("cotizaciones", update_quotes), ("indices", lambda: update_indices(force)),
-                     ("tesoro EE.UU.", lambda: update_ust(force))):
+                     ("tesoro EE.UU.", lambda: update_ust(force)), ("tasas", lambda: update_rates(force))):
         try:
             print(f"{name}: {fn()}")
         except Exception as e:  # una fuente caída no frena a la otra; queda el archivo anterior

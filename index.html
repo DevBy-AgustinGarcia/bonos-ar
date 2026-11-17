@@ -141,6 +141,7 @@ dialog#ficha::backdrop{background:rgba(14,24,38,.5)}
 .calc label{display:grid;gap:4px;font-size:12.5px;color:var(--muted)}
 .calc input{font:600 15px var(--sans);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:7px 11px;width:200px}
 tr.tot td{font-weight:700;border-top:2px solid var(--fg)}
+.hist{display:grid;gap:8px 18px;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
 .err-box{color:var(--down);font-size:13px;margin-top:8px}
 </style>
 </head>
@@ -531,6 +532,63 @@ const KIND = {
   none: () => 'Condiciones no disponibles',
 };
 let FICHA = null;
+
+/* ---------- Historial (fotos que guarda el workflow en data/history/AAAA-MM.csv) ---------- */
+const HIST = {};   // mes -> Promise<filas>
+function histMonth(ym) {
+  return HIST[ym] ??= fetch(`data/history/${ym}.csv`, { cache: 'no-cache' })
+    .then(r => r.ok ? r.text() : '')
+    .then(t => t.trim().split('\n').slice(1).filter(Boolean).map(l => {
+      const [fecha, tk, precio, tir, md, paridad, vol] = l.split(',');
+      return { t: new Date(fecha.replace(' ', 'T') + ':00-03:00'), tk, precio: +precio, tir: tir === '' ? null : +tir, md: +md, paridad: +paridad, vol: +vol };
+    }))
+    .catch(() => []);
+}
+async function bondHistory(tk, months = 3) {
+  const d = new Date(), yms = [];
+  for (let i = months - 1; i >= 0; i--) { const x = new Date(d.getFullYear(), d.getMonth() - i, 1); yms.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`); }
+  return (await Promise.all(yms.map(histMonth))).flat().filter(h => h.tk === tk).sort((a, b) => a.t - b.t);
+}
+const fdt = t => t.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Argentina/Buenos_Aires' });
+// Gráfico de una serie contra el tiempo. pts = [[Date, valor]]; el último punto puede ser "ahora" (hueco)
+function timeChart(pts, yfmt, col, label) {
+  pts = pts.filter(p => p[1] != null && isFinite(p[1]));
+  if (pts.length < 2) return '';
+  const W = 560, H = 170, m = { l: 58, r: 14, t: 22, b: 24 };
+  const t0 = +pts[0][0], t1 = +pts[pts.length - 1][0] || t0 + 1;
+  let y0 = Math.min(...pts.map(p => p[1])), y1 = Math.max(...pts.map(p => p[1]));
+  const pad = (y1 - y0) * 0.2 || Math.abs(y1) * 0.02 || 1; y0 -= pad; y1 += pad;
+  const sx = t => m.l + (t - t0) / ((t1 - t0) || 1) * (W - m.l - m.r), sy = v => H - m.b - (v - y0) / (y1 - y0) * (H - m.t - m.b);
+  let g = `<text x="${m.l}" y="13" style="fill:var(--fg);font-weight:600">${label}</text>`;
+  for (let k = 0; k <= 3; k++) { const v = y0 + (y1 - y0) * k / 3; g += `<line x1="${m.l}" x2="${W - m.r}" y1="${sy(v)}" y2="${sy(v)}" stroke="var(--line)"/><text x="${m.l - 6}" y="${sy(v) + 4}" text-anchor="end">${yfmt(v)}</text>`; }
+  const days = [...new Set(pts.map(p => p[0].toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })))];
+  const step = Math.ceil(days.length / 6); let lastX = -99;
+  pts.forEach((p, i) => {
+    const dl = p[0].toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' });
+    if ((i === 0 || dl !== pts[i - 1][0].toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })) && sx(+p[0]) - lastX > 40 && days.indexOf(dl) % step === 0) {
+      g += `<text x="${sx(+p[0])}" y="${H - 6}" text-anchor="middle">${dl}</text>`; lastX = sx(+p[0]);
+    }
+  });
+  g += `<polyline fill="none" stroke="${col}" stroke-width="2" points="${pts.map(p => `${sx(+p[0])},${sy(p[1])}`).join(' ')}"/>`;
+  g += pts.map(p => `<circle cx="${sx(+p[0])}" cy="${sy(p[1])}" r="${p[2] ? 4 : 3}" fill="${p[2] ? 'var(--surface)' : col}" stroke="${col}" stroke-width="${p[2] ? 2 : 0}"><title>${p[2] ? 'Ahora' : fdt(p[0])}: ${yfmt(p[1])}</title></circle>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${label} en el tiempo">${g}</svg>`;
+}
+async function renderHist(r) {
+  const el = document.getElementById('fHist'); if (!el) return;
+  const h = await bondHistory(r.tk);
+  if (FICHA !== r || !document.getElementById('fHist')) return;   // se abrió otra ficha mientras cargaba
+  const now = new Date(), live = h.length && now - h[h.length - 1].t > 10 * 60e3;
+  const tir = h.map(x => [x.t, x.tir == null ? null : x.tir * 100]).concat(live && r.tir != null ? [[now, r.tir * 100, true]] : []);
+  const px = h.map(x => [x.t, x.precio]).concat(live && r.price != null ? [[now, r.price, true]] : []);
+  const first = h[0], chg = (a, b) => a != null && b != null ? b - a : null;
+  const dT = first && chg(first.tir, r.tir), dP = first && r.price != null ? r.price / first.precio - 1 : null;
+  const sign = (v, f) => v == null ? '—' : `<span class="${v > 0 ? 'up' : v < 0 ? 'down' : ''}">${v > 0 ? '+' : ''}${f(v)}</span>`;
+  const charts = timeChart(tir, v => nf(v) + '%', 'var(--s1)', 'TIR') + timeChart(px, v => nf(v), 'var(--s2)', 'Precio');
+  el.innerHTML = `<h3>Historial</h3>` + (h.length < 2
+    ? `<p class="desc">Todavía hay ${h.length ? 'una sola foto' : 'pocas fotos'} de este bono. El panel guarda precio y TIR varias veces por día de mercado; el gráfico aparece cuando hay al menos dos.</p>`
+    : `<p class="desc">${h.length} fotos desde el ${fdt(first.t)}. Desde la primera: TIR ${sign(dT == null ? null : dT * 1e4, v => nf(v, 0) + ' pb')}, precio ${sign(dP, v => pct(v))}.${live ? ' El punto hueco es el valor de ahora.' : ''}</p>
+       <div class="hist">${charts}</div>`);
+}
 // Qué supuesto hay detrás de los montos proyectados, según el tipo de bono.
 const projNote = r => r.b.group === 'CER' ? 'Montos en pesos de hoy: a cada pago se le suma la inflación (CER) que haya hasta esa fecha.'
   : r.b.group === 'DL' ? 'Montos al dólar oficial (A3500) de hoy: cambian con el tipo de cambio al vencimiento.'
@@ -550,6 +608,7 @@ function openFicha(tk) {
       ${kv('Tipo', esc((KIND[b.kind] || (() => b.kind))(b)))}${kv('Moneda', esc(b.curr || '—'))}${kv('Especie', esc(r.sym || '—'))}
       ${kv('Emisión', fdate(b.issue))}${kv('Vencimiento', fdate(b.mat))}${kv('Base de cálculo', esc(b.dc || '—'))}
     </dl>
+    <div id="fHist"></div>
     ${r.flows ? `
     <h3>Calculadora</h3>
     <div class="calc">
@@ -562,6 +621,7 @@ function openFicha(tk) {
     : '<p class="desc">No hay flujo calculable para este instrumento (sin precio o con condiciones incompletas).</p>'}`;
   if (!dlg.open) dlg.showModal();
   if (r.flows) calcFicha();
+  renderHist(r);
 }
 function calcFicha() {
   const r = FICHA; if (!r?.flows) return;

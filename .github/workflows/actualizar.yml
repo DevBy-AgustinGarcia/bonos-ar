@@ -40,7 +40,7 @@ jobs:
         continue-on-error: true   # si una fuente cae, se publica con el último dato guardado
 
       - name: Foto histórica de TIR
-        if: github.event_name == 'schedule' && github.event.schedule != '0 9 * * *'
+        if: (github.event_name == 'schedule' && github.event.schedule != '0 9 * * *') || github.event_name == 'workflow_dispatch'
         run: node snapshot.js
 
       - name: Guardar datos en el repo

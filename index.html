@@ -374,8 +374,23 @@ function drawChart(pts) {
   for (const sov of [true, false]) {
     const s = pts.filter(p => p.sov === sov).sort((a,b)=>a.md-b.md), col = sov ? 'var(--s1)' : 'var(--s2)';
     if (s.length > 1) g += `<polyline fill="none" stroke="${col}" stroke-width="1.2" stroke-opacity=".35" points="${s.map(p=>`${sx(p.md)},${sy(p.tir*100)}`).join(' ')}"/>`;
-    g += s.map((p,i) => `<circle cx="${sx(p.md)}" cy="${sy(p.tir*100)}" r="4" fill="${col}"><title>${esc(p.tk)} · ${esc(p.name)}: ${pct(p.tir)} · MD ${nf(p.md)}</title></circle>
-      <text x="${sx(p.md)+6}" y="${sy(p.tir*100)+(i%2?13:-6)}" style="fill:${col}">${esc(p.tk)}</text>`).join('');
+    g += s.map(p => `<circle cx="${sx(p.md)}" cy="${sy(p.tir*100)}" r="4" fill="${col}"><title>${esc(p.tk)} · ${esc(p.name)}: ${pct(p.tir)} · MD ${nf(p.md)}</title></circle>`).join('');
+  }
+  // Etiquetas sin superponerse: primero Nación y los más operados; se prueba cada posición alrededor del punto
+  const dots = pts.map(p => [sx(p.md), sy(p.tir*100)]), boxes = [];
+  const hit = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+  const order = [...pts].sort((a, b) => (b.sov - a.sov) || ((b.vol || 0) - (a.vol || 0)));
+  const POS = [[6,-6,'start'],[6,14,'start'],[-6,-6,'end'],[-6,14,'end'],[0,-11,'middle'],[0,22,'middle'],[8,4,'start'],[-8,4,'end'],[6,-20,'start'],[6,28,'start'],[-6,-20,'end'],[-6,28,'end']];
+  for (const p of order) {
+    const x = sx(p.md), y = sy(p.tir*100), w = p.tk.length * 7.6, h = 12;
+    for (const [dx, dy, a] of POS) {
+      const l = a === 'start' ? x + dx : a === 'end' ? x + dx - w : x - w / 2, b = [l, y + dy - h + 2, l + w, y + dy + 2];
+      if (b[0] < m.l || b[2] > W || b[1] < 0 || b[3] > H - m.b) continue;
+      if (boxes.some(o => hit(o, b)) || dots.some(([cx, cy]) => hit([cx-4, cy-4, cx+4, cy+4], b))) continue;
+      boxes.push(b);
+      g += `<text x="${x+dx}" y="${y+dy}" text-anchor="${a}" style="fill:${p.sov ? 'var(--s1)' : 'var(--s2)'}">${esc(p.tk)}</text>`;
+      break;
+    }
   }
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Curva de rendimientos">${g}</svg>`;
 }

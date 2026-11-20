@@ -81,7 +81,9 @@
       .map(r => { const u = interp(curve, r.md) ?? curve[curve.length - 1][1];
                   return { tk: r.tk, mat: r.mat, md: r.md, tir: r.tir, ust: u, bps: (r.tir - u) * 1e4, ny: /^GD/.test(r.tk) }; })
       .sort((a, b) => a.md - b.md);
-    const gd = out.filter(r => r.ny);
+    // Se descartan los Globales casi sin operaciones (su precio es viejo y tuerce el promedio)
+    const vol = tk => rows.find(r => r.tk === tk)?.vol || 0, all = out.filter(r => r.ny), vmax = Math.max(0, ...all.map(r => vol(r.tk)));
+    const gd = all.filter(r => vol(r.tk) >= vmax * 0.05);
     return { rows: out, embi: gd.length ? gd.reduce((s, r) => s + r.bps, 0) / gd.length : null, date: ust.date };
   }
 

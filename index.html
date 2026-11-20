@@ -219,6 +219,8 @@ const SECTIONS = [
   { id:'calendario', title:'Calendario', view:'cal' },
 ];
 let LAST = {}; // última vista calculada: filas, contexto y tabla visible (para CSV, ficha y calendario)
+let rpOficial = null;
+fetch('https://api.argentinadatos.com/v1/finanzas/indices/riesgo-pais/ultimo').then(r => r.json()).then(j => { if (j?.valor) { rpOficial = j; if (LAST?.rows) render(); } }).catch(() => {});
 let CAT = [], quotes = null, idx = null, ust = null, tasas = null, lastOk = null, sortKey = 'md', sortDir = 1;
 let tab = (location.hash || '').slice(1);
 try { if (!SECTIONS.some(s => s.id === tab)) tab = localStorage.getItem('tab') || 'hd'; } catch { tab = tab || 'hd'; }
@@ -312,8 +314,8 @@ function render(stale) {
     ['MEP (AL30)', '$ ' + nf(mep)], ['CCL (GD30)', '$ ' + nf(ccl)], ['A3500', '$ ' + nf(ctx.a3500Now)],
     ['TAMAR priv. TNA', nf(ctx.tamarNow) + '%'], ['BADLAR priv. TNA', nf(ctx.badlarNow) + '%'],
     ['CER (liquidación)', nf(ctx.cerLag(settle), 4)],
-    ['Riesgo país est.', nf(A.countryRisk(rows, ust).embi, 0) + ' pb'],
-  ].map(([l,v]) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+    ['Riesgo país est.', nf(A.countryRisk(rows, ust).embi, 0) + ' pb', rpOficial ? `Cierre ${fdate(rpOficial.fecha)}: ${nf(rpOficial.valor, 0)} pb` : ''],
+  ].map(([l,v,n]) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div>${n ? `<div class="sub">${n}</div>` : ''}</div>`).join('');
 
   // Pestañas con cantidad de instrumentos
   const tabLink = s => `<a href="#${s.id}" class="${s.id===tab?'on':''}"${s.id===tab?' aria-current="page"':''}>${s.title}${s.g ? `<span>${rows.filter(r => r.b.group === s.g).length}</span>` : ''}</a>`;
@@ -455,7 +457,7 @@ function renderAnalysis(rows, ctx) {
       'Diferencia de TIR entre cada Bonar (ley argentina) y su Global (ley Nueva York), que tienen los mismos pagos. Un spread alto indica que el mercado cobra más por el riesgo de jurisdicción.',
       tbl([['Par',r=>`<b>${r.ar}</b> / ${r.ny}`,'l'],['Dur.',md],['Precio AL',r=>nf(r.pxAr)],['Precio GD',r=>nf(r.pxNy)],['TIR Bonar',r=>pct(r.tirAr)],['TIR Global',r=>pct(r.tirNy)],['Spread',r=>`<b>${bps(r.bps)}</b>`]], law)),
     anPanel('Riesgo país estimado',
-      `Spread de cada soberano en dólares contra el Tesoro de EE.UU. al mismo plazo (curva del ${fdate(cr.date)}). Promedio de los Globales: <span class="big">${bps(cr.embi)}</span>. Es una aproximación, no el índice oficial de JP Morgan.`,
+      `Spread de cada soberano en dólares contra el Tesoro de EE.UU. al mismo plazo (curva del ${fdate(cr.date)}). Promedio de los Globales con operaciones: <span class="big">${bps(cr.embi)}</span>. Es una aproximación y puede diferir del índice oficial de JP Morgan${rpOficial ? ` (cierre del ${fdate(rpOficial.fecha)}: ${bps(rpOficial.valor)})` : ''}, que se publica una vez por día.`,
       miniChart([{ pts: cr.rows.filter(r=>r.ny).map(r => [r.md, r.bps, r.tk]), color:'var(--s1)', line:true },
                  { pts: cr.rows.filter(r=>!r.ny).map(r => [r.md, r.bps, r.tk]), color:'var(--s2)' }], v => nf(v,0)) +
       tbl([['Bono',r=>tk(r)+warn(r.tk),'l'],['Ley',r=>r.ny?'NY':'AR','l'],['Vto.',vto],['Dur.',md],['TIR',r=>pct(r.tir)],['Tesoro EE.UU.',r=>pct(r.ust)],['Spread',r=>`<b>${bps(r.bps)}</b>`]], cr.rows)),
